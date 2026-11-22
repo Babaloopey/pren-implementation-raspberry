@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'microphone_driver = robot_audio.microphone_driver:main',
         ],
     },
 )

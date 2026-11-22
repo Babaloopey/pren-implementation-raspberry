@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'robot_actuation'
+package_name = 'robot_gpio'
 
 setup(
     name=package_name,
@@ -24,6 +24,10 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'search_button_driver = robot_gpio.search_button_driver:main',
+            'bone_button_driver = robot_gpio.bone_button_driver:main',
+            'led_driver = robot_gpio.led_driver:main',
+            'speaker_driver = robot_gpio.speaker_driver:main',
         ],
     },
 )

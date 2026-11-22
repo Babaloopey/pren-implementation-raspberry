@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'topic_debugger = robot_core.topic_debugger:main',
         ],
     },
 )
