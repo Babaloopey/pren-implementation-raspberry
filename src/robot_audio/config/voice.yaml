@@ -1,0 +1,21 @@
+# Parameters for the audio nodes. Tune thresholds with
+#   ros2 launch robot_audio voice.launch.py scores:=true
+#   ros2 topic echo /perception/voice_scores     (order: commands below)
+microphone_driver:
+  ros__parameters:
+    device_index: -1                    # -1 = default input (the log lists all inputs)
+    device_name: ''                     # e.g. 'USB' to pick the USB microphone
+    mic_rate: 0                         # 0 = auto (16 kHz if supported, else resampled)
+    gain: 1.0
+
+voice_command_detector:
+  ros__parameters:
+    commands:    [SUCH, HIER, BRAV, SITZ]
+    model_files: [such_de.onnx, hier_de.onnx, brav_de.onnx, sitz_de.onnx]
+    thresholds:  [0.8, 0.5, 0.5, 0.8]   # SUCH/SITZ good statistics, HIER/BRAV medium
+    vad_threshold: 0.3
+    required_consecutive: 2
+    cooldown_s: 1.5
+    global_cooldown_s: 0.8
+    audio_topic: /audio/raw
+    publish_scores: false
