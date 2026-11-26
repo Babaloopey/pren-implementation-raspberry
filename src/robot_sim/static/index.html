@@ -199,7 +199,7 @@ dialog pre { margin: 0; padding: 12px; max-height: 70vh; overflow: auto; font: 1
 
 <script>
 const $ = (id) => document.getElementById(id);
-const MODE_LABEL = { real: 'Echt', buttons: 'Knöpfe', sim: 'Simuliert', button: 'Knopf', manual: 'Manuell' };
+const MODE_LABEL = { real: 'Echt', buttons: 'Knöpfe', sim: 'Simuliert', button: 'Knopf', manual: 'Manuell', pi: 'Auf dem Pi' };
 const GESTURES = [['SITZ', 'SITZ'], ['PLATZ', 'PLATZ'], ['AUF', 'AUF'], ['TRICK', 'Daumen hoch']];
 const WORDS = ['SUCH', 'HIER', 'BRAV', 'SITZ'];
 let S = null, lastEvent = 0, lastBuzz = -1, logKey = null, busy = false;
@@ -284,6 +284,9 @@ $('logClose').onclick = () => { $('logDlg').close(); logKey = null; };
 let nodesHtml = '', bridgeHtml = '';
 const NEEDS = { gesture_detector: 'video', bone_detector: 'video', voice_command_detector: 'audio' };
 function warnFor(s) {
+  if (s.mode === 'pi') return s.seen ? '' : '⚠ auf dem Pi nicht gefunden: läuft dort tools/pi_hil.sh? Verbindung?';
+  // replaced here, but the real node is still on the network (Pi): both would send commands
+  if (s.mode !== 'real' && s.seen && s.process) return '⚠ läuft zusätzlich im Netz (Pi?): dort stoppen, sonst doppelte Befehle';
   const need = NEEDS[s.key];
   if (s.mode !== 'real' || !need) return '';
   if (!s.running) return '';
@@ -302,12 +305,16 @@ const ACCEPT = {
 function renderBanner() {
   const st = S.slots.find(x => x.key === 'state_coordinator'), cc = S.slots.find(x => x.key === 'command_coordinator');
   let msg = '';
-  if (st.mode === 'real' && cc.mode === 'manual')
-    msg = 'state_coordinator wartet: er startet erst, wenn command_coordinator auf «Echt» steht. Bis dahin reagiert der Hund auf nichts.';
-  else if (st.mode === 'real' && S.state === '-')
-    msg = 'state_coordinator startet …';
+  const stOn = st.mode === 'real' || st.mode === 'pi';
+  if (S.profile === 'hil' && !S.network_nodes.length)
+    msg = 'Keine Verbindung zum Raspberry Pi: läuft dort tools/pi_hil.sh? Stimmt die IP (start_simulator_hil.cmd)? Log: logs/zenoh_router.log';
+  else if (stOn && cc.mode === 'manual')
+    msg = 'state_coordinator wartet: er startet erst, wenn command_coordinator läuft («Echt» oder «Auf dem Pi»). Bis dahin reagiert der Hund auf nichts.';
+  else if (stOn && S.state === '-')
+    msg = st.mode === 'pi' ? 'Warte auf den Zustand vom state_coordinator auf dem Pi … (er sendet ihn beim Start; evtl. dort neu starten)'
+                           : 'state_coordinator startet …';
   $('banner').textContent = msg;
-  $('accept').textContent = st.mode !== 'real' ? 'state_coordinator ist aus (Manuell): Eingaben werden nur geloggt.'
+  $('accept').textContent = !stOn ? 'state_coordinator ist aus (Manuell): Eingaben werden nur geloggt.'
     : ACCEPT[S.state] ? `Im Zustand ${S.state} reagiert der Hund auf: ${ACCEPT[S.state]}`
     : `Im Zustand ${S.state} werden Befehle ignoriert (Ablauf läuft).`;
   const vs = S.voice_scores, box = $('scoresBox');
@@ -321,14 +328,20 @@ function renderBanner() {
 }
 function renderNodes() {
   const html = S.slots.map(s => {
-    const st = s.process && s.mode === 'real' ? (s.running ? 'run' : 'dead') : 'sim';
-    const title = st === 'run' ? 'läuft' : st === 'dead' ? `gestoppt (exit ${s.exit})` : 'Ersatz im Simulator';
+    const st = s.mode === 'pi' ? (s.seen ? 'run' : 'dead')
+      : s.process && s.mode === 'real' ? (s.running ? 'run' : 'dead') : 'sim';
+    const title = s.mode === 'pi' ? (s.seen ? 'läuft auf dem Pi' : 'auf dem Pi nicht gefunden')
+      : st === 'run' ? 'läuft' : st === 'dead' ? `gestoppt (exit ${s.exit})` : 'Ersatz im Simulator';
+    const info = s.mode === 'pi' ? (s.perf || 'läuft auf dem Raspberry Pi')
+      : s.mode === 'real' ? (s.perf || (s.running ? 'läuft' : `gestoppt, exit ${s.exit}`))
+      : 'Ersatz: ' + (s.mode === 'sim' ? 'Simulation' : 'Knöpfe / manuell');
     return `<div class="node"><span class="status ${st}" title="${title}"></span>
       <span class="name">${s.label}</span>
       <span class="seg">${s.modes.map(m => `<button data-slot="${s.key}" data-mode="${m}" class="${m === s.mode ? 'active' : ''}">${MODE_LABEL[m]}</button>`).join('')}</span>
-      ${s.process ? `<button data-log="${s.key}" title="Ausgabe des Prozesses">Log</button>` : '<span></span>'}
-      <span class="perf${warnFor(s) ? ' warn' : ''}">${warnFor(s) || (s.mode === 'real' ? (s.perf || (s.running ? 'läuft' : `gestoppt, exit ${s.exit}`)) : 'Ersatz: ' + (s.mode === 'sim' ? 'Simulation' : 'Knöpfe / manuell'))}</span></div>`;
-  }).join('');
+      ${s.process || s.mode === 'pi' ? `<button data-log="${s.key}" title="Ausgabe des Nodes">Log</button>` : '<span></span>'}
+      <span class="perf${warnFor(s) ? ' warn' : ''}">${warnFor(s) || info}</span></div>`;
+  }).join('') + (S.profile === 'hil' || S.network_nodes.length
+    ? `<div class="hint">Im Netz (Pi): ${S.network_nodes.length ? S.network_nodes.join(', ') : 'keine Nodes gefunden'}</div>` : '');
   if (html !== nodesHtml) { $('nodes').innerHTML = html; nodesHtml = html; }   // rebuild only on change (keeps clicks)
   const b = S.bridge;
   const bh = b.running

@@ -1,7 +1,10 @@
 """The whole robot: perception + GPIO drivers + behaviour (state_coordinator, command_coordinator).
 
     ros2 launch robot_core robot.launch.py [gpio:=true] [camera:=true] [bones:=true]
-        [gestures:=true] [voice:=true] [debug:=false] [mic:=MV7]
+        [gestures:=true] [voice:=true] [debug:=false] [mic:=MV7] [odom_source:=internal]
+
+odom_source:=mcu when a (virtual) microcontroller reports /mcu/odom, e.g. hardware-in-the-loop
+with the laptop simulator (tools/pi_hil.sh).
 
 Logs: ~/pren_logs/states_*.log (state changes), ~/pren_logs/commands_*.log (motor commands)
 """
@@ -36,12 +39,14 @@ def generate_launch_description():
         DeclareLaunchArgument('voice', default_value='true'),
         DeclareLaunchArgument('debug', default_value='false'),
         DeclareLaunchArgument('mic', default_value='MV7'),
+        DeclareLaunchArgument('odom_source', default_value='internal',
+                              description='internal (no MCU) | mcu (/mcu/odom from the microcontroller)'),
 
         IncludeLaunchDescription(PythonLaunchDescriptionSource(perception),
                                  launch_arguments={k: arg(k) for k in pass_through}.items()),
         *gpio,
         Node(package='robot_core', executable='command_coordinator', name='command_coordinator',
-             output='screen', parameters=[config]),
+             output='screen', parameters=[config, {'odom_source': arg('odom_source')}]),
         Node(package='robot_core', executable='state_coordinator', name='state_coordinator',
              output='screen', parameters=[config]),
     ])

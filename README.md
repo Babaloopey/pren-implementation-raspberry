@@ -309,6 +309,67 @@ ab ~0.66 m. Deshalb gilt der Knochen als «nahe», wenn er im untersten 5 % des 
 nach «Kopf senken» fährt der Hund bis zu 1 m blind weiter (`near_bottom_frac`, `touch_max_distance`).
 Mit der echten Kamerahöhe neu prüfen: `docker compose run --rm --service-ports sim ros2 launch robot_sim sim.launch.py camera_height:=0.18`.
 
+## Hardware-in-the-Loop: Raspberry Pi + Laptop (Variante B)
+
+Die **echten Roboter-Nodes laufen auf dem Pi** (Pi-Kamera, MV7, Taster, LED, Buzzer, Erkennung,
+`state_coordinator`, `command_coordinator`). Der **Laptop simuliert nur, was noch fehlt**: den
+Mikrocontroller samt Roboterkörper, das Spielfeld und die Knochen; dazu das GUI. So lässt sich der
+Pi mit echten Sensoren und echter Last testen, bevor Motoren und Mikrocontroller da sind.
+
+```
+Raspberry Pi (tools/pi_hil.sh)                          Laptop (start_simulator_hil.cmd <PI-IP>)
+  camera_driver, microphone_driver, robot_gpio            simulator: virtueller Mikrocontroller,
+  gesture_detector, voice_command_detector                  Spielfeld, Knochen-Erkennung + -Kontakt, GUI
+  state_coordinator, command_coordinator (odom: mcu)
+  Zenoh-Router  :7447  <──────── TCP ────────  Zenoh-Router im Container
+        /motor_command  ──────────────────────────>  virtueller Mikrocontroller
+        /mcu/odom, /perception/bone_*  <───────────  Simulation
+        /robot_state, /rosout, Erkennungen  ──────>  GUI
+```
+
+Die Kommunikation ist normales ROS 2 über **Zenoh** (`rmw_zenoh`): je ein Router auf Pi und Laptop,
+der Laptop verbindet sich per TCP auf Port 7447 des Pi. Zenoh überträgt nur Topics, die die andere
+Seite abonniert; die Kamerabilder bleiben deshalb auf dem Pi.
+
+**Einmalig auf dem Pi:** `sudo apt install ros-jazzy-rmw-zenoh-cpp`, dann den Workspace bauen.
+
+**Start:**
+
+```bash
+bash tools/pi_hil.sh                 # auf dem Pi; zeigt am Anfang seine IP-Adressen an
+```
+
+```bat
+start_simulator_hil.cmd 192.168.1.50 :: auf dem Laptop, IP des Pi
+```
+
+Das Laptop-Skript prüft zuerst, ob der Pi auf Port 7447 erreichbar ist, und öffnet dann das GUI.
+Zurück zum reinen Laptop-Simulator: `start_simulator.cmd`.
+
+**Im GUI** steht bei den Nodes der dritte Modus **«Auf dem Pi»**: Der Simulator startet und ersetzt den
+Node dann nicht, er zeigt nur, ob er im Netz gefunden wird (grün/rot), seine `perf:`-Zeile und über
+«Log» seine Ausgabe (aus `/rosout`). Unter den Nodes steht die Liste «Im Netz (Pi)». Voreinstellung:
+
+| Node | Modus | Warum |
+|---|---|---|
+| Gesten-, Spracherkennung | Auf dem Pi | echte Pi-Kamera und MV7 |
+| Knochenerkennung, Knochen-Taster | Simuliert | der Roboterkörper ist virtuell: die echte Pi-Kamera sieht den Raum, nicht das simulierte Feld |
+| `state_coordinator`, `command_coordinator` | Auf dem Pi | |
+
+Weiterhin möglich: Gesten/Sprache auf «Knöpfe» stellen (dann den Node auf dem Pi weglassen:
+`bash tools/pi_hil.sh gestures:=false`, sonst warnt das GUI vor doppelten Befehlen), oder den echten
+`bone_detector` auf dem Pi testen: `bash tools/pi_hil.sh bones:=true` und im GUI «Auf dem Pi».
+
+**Voraussetzungen und Grenzen:**
+* Pi und Laptop im selben Netz. Uni-/Firmen-WLANs blockieren oft Geräte untereinander, dann einen
+  eigenen Router oder den Hotspot des Laptops verwenden.
+* Beide Seiten nutzen `ROS_DOMAIN_ID=17` (setzen die Skripte).
+* «Neustart» im GUI setzt nur die Simulation zurück; `state_`/`command_coordinator` auf dem Pi laufen
+  weiter. Für einen sauberen Start `tools/pi_hil.sh` auf dem Pi neu starten.
+* Debug-Bilder der Pi-Kamera werden nicht übertragen (zu gross fürs WLAN).
+* Getestet mit einem zweiten Container als «Pi» (Router-zu-Router-Verbindung, Suchlauf über das Netz,
+  Logs über `/rosout`), noch nicht mit einem echten Pi im WLAN.
+
 ## Performance prüfen
 
 In dieser Reihenfolge, vom schnellsten zum aufwendigsten Test:

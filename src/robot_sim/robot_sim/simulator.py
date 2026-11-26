@@ -11,6 +11,8 @@
         state_coordinator       real                  | manual (send single RobotCommands)
         command_coordinator     real                  | manual (drive the virtual MCU directly)
     "real" starts the unchanged robot node as its own process (`ros2 run`).
+    "pi" (hardware-in-the-loop, profile:=hil): the node runs on the Raspberry Pi; the simulator
+    neither starts nor replaces it, it only shows whether it is seen and its log (/rosout).
   * buttons for everything a human does: gestures, words, search button, shutdown
   * web GUI on http://localhost:<http_port>
 """
@@ -25,8 +27,9 @@ import rclpy
 import rclpy.executors
 from ament_index_python.packages import get_package_share_directory
 from nav_msgs.msg import Odometry
+from rcl_interfaces.msg import Log
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from robot_interfaces.msg import (BoneDetection, BoneDetectionArray, CommandStatus, Gesture,
                                   MotorCommand, RobotCommand, VoiceCommand)
 from sensor_msgs.msg import Image
@@ -39,17 +42,22 @@ from .world import INTERACT_RADIUS, PERSON, PYLONS, SEG_HALF_ANGLE, SEG_R_MAX, S
 
 SLOTS = [
     dict(key='gesture_detector', label='Gestenerkennung', pkg='robot_vision', cfg='vision.yaml',
-         modes=['real', 'buttons'], default='buttons', bridge=True, params=['publish_debug_image:=true']),
+         modes=['real', 'buttons', 'pi'], default='buttons', bridge=True, params=['publish_debug_image:=true']),
     dict(key='voice_command_detector', label='Spracherkennung', pkg='robot_audio', cfg='voice.yaml',
-         modes=['real', 'buttons'], default='buttons', bridge=True, params=['publish_scores:=true']),
+         modes=['real', 'buttons', 'pi'], default='buttons', bridge=True, params=['publish_scores:=true']),
     dict(key='bone_detector', label='Knochenerkennung', pkg='robot_vision', cfg='vision.yaml',
-         modes=['real', 'sim'], default='sim', bridge=True, params=['publish_debug_image:=true']),
-    dict(key='bone_button', label='Knochen-Taster', modes=['sim', 'button'], default='sim'),
+         modes=['real', 'sim', 'pi'], default='sim', bridge=True, params=['publish_debug_image:=true']),
+    dict(key='bone_button', label='Knochen-Taster', node='bone_button_driver', modes=['sim', 'button', 'pi'],
+         default='sim'),
     dict(key='state_coordinator', label='state_coordinator', pkg='robot_core', cfg='core.yaml',
-         modes=['real', 'manual'], default='real', params=['log_dir:={log}']),
+         modes=['real', 'manual', 'pi'], default='real', params=['log_dir:={log}']),
     dict(key='command_coordinator', label='command_coordinator', pkg='robot_core', cfg='core.yaml',
-         modes=['real', 'manual'], default='real', params=['odom_source:=mcu', 'log_dir:={log}']),
+         modes=['real', 'manual', 'pi'], default='real', params=['odom_source:=mcu', 'log_dir:={log}']),
 ]
+# hardware-in-the-loop: recognition and behaviour on the Pi; the robot body, its microcontroller
+# and the field are simulated, so bones (detection + contact) come from the simulated field
+HIL_MODES = {'gesture_detector': 'pi', 'voice_command_detector': 'pi', 'bone_detector': 'sim',
+             'bone_button': 'sim', 'state_coordinator': 'pi', 'command_coordinator': 'pi'}
 ACTIONS = {'STOP': RobotCommand.STOP, 'MOVE': RobotCommand.MOVE, 'TURN': RobotCommand.TURN,
            'VELOCITY': RobotCommand.VELOCITY, 'POSTURE': RobotCommand.POSTURE, 'HEAD': RobotCommand.HEAD,
            'BEHAVIOR': RobotCommand.BEHAVIOR, 'SIGNAL': RobotCommand.SIGNAL}
@@ -79,6 +87,7 @@ class Simulator(Node):
             ('camera_height', 0.25),      # m, simulated camera mount (bone_detector does not know it)
             ('detection_rate', 5.0),      # Hz of the simulated bone_detector
             ('watchdog', 0.5),            # s without /motor_command -> virtual MCU stops
+            ('profile', 'local'),         # local: everything on this PC | hil: robot nodes on the Pi
         ])
         self.p = {prm.name: prm.value for prm in params}
         self.lock = threading.RLock()
@@ -125,7 +134,10 @@ class Simulator(Node):
         self.voice_scores = {'values': [], 'peaks': [], 't': 0.0}
 
         self.create_subscription(Odometry, '/odom', self.on_belief, 20)
-        self.create_subscription(String, '/robot_state', self.on_robot_state, 10)
+        # latched like the publisher in state_coordinator: the current state arrives even when the
+        # simulator connects later (e.g. to the Pi)
+        self.create_subscription(String, '/robot_state', self.on_robot_state,
+                                 QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.create_subscription(RobotCommand, '/robot_command', self.on_robot_command, 50)
         self.create_subscription(CommandStatus, '/robot_command_status', self.on_status, 50)
         self.create_subscription(Gesture, '/perception/gestures',
@@ -147,7 +159,14 @@ class Simulator(Node):
                                      lambda m, n=name: self.on_image(n, m), qos_profile_sensor_data)
 
         # --- slots / processes
-        self.slots = {s['key']: dict(s, mode=s['default'], proc=None) for s in SLOTS}
+        hil = self.p['profile'] == 'hil'
+        self.slots = {s['key']: dict(s, mode=HIL_MODES[s['key']] if hil else s['default'], proc=None)
+                      for s in SLOTS}
+        self.rosout = collections.defaultdict(lambda: collections.deque(maxlen=300))   # node -> lines
+        self.rosout_perf = {}
+        self.seen_nodes = set()
+        self.create_subscription(Log, '/rosout', self.on_rosout, 100)
+        self.create_timer(1.0, self.scan_nodes)
         self.bridge = ManagedProcess('pc_bridge', ['ros2', 'run', 'robot_sim', 'pc_bridge'])
         self.apply_modes()
 
@@ -248,6 +267,22 @@ class Simulator(Node):
         with self.lock:
             self.buzzer = {'count': self.buzzer['count'] + 1, 'last': msg.data.strip().lower()}
         self.event('Buzzer', msg.data)
+
+    def on_rosout(self, msg):
+        name = msg.name.split('.')[-1]
+        level = {10: 'DEBUG', 20: 'INFO', 30: 'WARN', 40: 'ERROR', 50: 'FATAL'}.get(msg.level, str(msg.level))
+        with self.lock:
+            self.rosout[name].append(f'[{level}] {msg.msg}')
+            if msg.msg.startswith('perf:'):
+                self.rosout_perf[name] = msg.msg
+        slot = next((s for s in self.slots.values() if s.get('node', s['key']) == name), None)
+        if slot is not None and slot['mode'] == 'pi':
+            self.on_node_line(slot['key'], msg.msg)
+
+    def scan_nodes(self):
+        names = set(self.get_node_names())
+        with self.lock:
+            self.seen_nodes = names
 
     def on_voice_scores(self, msg):
         vals = list(msg.data)
@@ -361,8 +396,12 @@ class Simulator(Node):
                 'slots': [{'key': k, 'label': s['label'], 'mode': s['mode'], 'modes': s['modes'],
                            'running': bool(s['proc'] and s['proc'].running),
                            'exit': None if s['proc'] is None else s['proc'].exit_code,
-                           'perf': s['proc'].perf if s['proc'] else '',
+                           'perf': (self.rosout_perf.get(s.get('node', k), '') if s['mode'] == 'pi'
+                                    else s['proc'].perf if s['proc'] else ''),
+                           'seen': s.get('node', k) in self.seen_nodes,
                            'process': 'pkg' in s} for k, s in self.slots.items()],
+                'profile': self.p['profile'],
+                'network_nodes': sorted(self.seen_nodes - self.local_nodes()),
                 'bridge': {'running': self.bridge.running, **self.bridge_status},
                 'events': list(self.events)[-120:],
                 'manual_status': {str(k): v for k, v in list(self.manual_status.items())[-30:]},
@@ -370,10 +409,20 @@ class Simulator(Node):
                 'voice_scores': self.voice_scores if t - self.voice_scores['t'] < 2.0 else None,
             }
 
+    def local_nodes(self):
+        """Nodes this PC runs itself (simulator, its own processes, ros2 CLI helpers)."""
+        own = {'simulator', 'pc_bridge'}
+        own |= {s.get('node', k) for k, s in self.slots.items() if s['proc'] is not None and s['proc'].running}
+        return own | {n for n in self.seen_nodes if n.startswith('_')}
+
     def logs(self, key):
         if key == 'pc_bridge':
             return self.bridge.tail(200)
         s = self.slots.get(key)
+        if s and s['mode'] == 'pi':
+            with self.lock:
+                lines = list(self.rosout.get(s.get('node', key), []))
+            return ['(Log vom Raspberry Pi, über /rosout)'] + lines[-200:]
         return s['proc'].tail(200) if s and s['proc'] else []
 
     def image(self, name):
@@ -459,6 +508,9 @@ class Simulator(Node):
             self.belief, self.belief_trace, self.robot_state = None, [], '-'
             self.led = 'off'
         self.event('Welt', 'Neustart: Roboter im Startfeld' + (', Kern-Nodes neu gestartet' if procs else ''))
+        if any(s['mode'] == 'pi' for k, s in self.slots.items() if k in ('state_coordinator', 'command_coordinator')):
+            self.event('Welt', 'state_/command_coordinator laufen auf dem Pi weiter: für einen sauberen Start '
+                               'dort tools/pi_hil.sh neu starten')
         self.apply_modes()
 
     def destroy_node(self):

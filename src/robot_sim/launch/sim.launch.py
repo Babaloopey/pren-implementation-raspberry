@@ -1,4 +1,4 @@
-"""PC simulator: ros2 launch robot_sim sim.launch.py [port:=8080] [bones:=1] [camera_height:=0.25]
+"""PC simulator: ros2 launch robot_sim sim.launch.py [port:=8080] [bones:=1] [camera_height:=0.25] [profile:=local|hil]
 
 Starts only the simulator; it starts/stops the real robot nodes itself (GUI switches).
 GUI: http://localhost:8080
@@ -17,11 +17,14 @@ def generate_launch_description():
         DeclareLaunchArgument('bones', default_value='1'),
         DeclareLaunchArgument('camera_height', default_value='0.25'),
         DeclareLaunchArgument('log_dir', default_value='/ws/logs'),
+        DeclareLaunchArgument('profile', default_value='local',
+                              description='local: all nodes on this PC, hil: robot nodes on the Raspberry Pi'),
         Node(package='robot_sim', executable='simulator', name='simulator', output='screen',
              parameters=[{
                  'http_port': ParameterValue(arg('port'), value_type=int),
                  'n_bones': ParameterValue(arg('bones'), value_type=int),
                  'camera_height': ParameterValue(arg('camera_height'), value_type=float),
                  'log_dir': arg('log_dir'),
+                 'profile': arg('profile'),
              }]),
     ])

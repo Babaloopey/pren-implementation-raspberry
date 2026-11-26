@@ -226,8 +226,13 @@ class CommandCoordinator(Node):
                 math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z)))
         if self.last_mcu is not None:
             lx, ly, lyaw = self.last_mcu
-            self.progress[0] += math.hypot(pose[0] - lx, pose[1] - ly)
-            self.progress[1] += abs(math.atan2(math.sin(pose[2] - lyaw), math.cos(pose[2] - lyaw)))
+            d_lin = math.hypot(pose[0] - lx, pose[1] - ly)
+            d_ang = abs(math.atan2(math.sin(pose[2] - lyaw), math.cos(pose[2] - lyaw)))
+            if d_lin > 0.5 or d_ang > 1.0:       # impossible in one message: the MCU reset its odometry
+                self.log(f'MCU odometry jumped ({d_lin:.2f} m, {d_ang:.2f} rad): treated as reset')
+            else:
+                self.progress[0] += d_lin
+                self.progress[1] += d_ang
         self.last_mcu = pose
         self.x, self.y, self.yaw = pose
 

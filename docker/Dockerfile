@@ -23,6 +23,11 @@ RUN pip3 install "numpy<2" onnxruntime mediapipe sounddevice scikit-learn tqdm r
 RUN apt-get update && apt-get install -y --no-install-recommends libgles2 libegl1 libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Zenoh middleware for hardware-in-the-loop with the Raspberry Pi (docker-compose.hil.yml):
+# works through Docker Desktop's NAT, unlike DDS multicast discovery
+RUN apt-get update && apt-get install -y --no-install-recommends ros-jazzy-rmw-zenoh-cpp \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 

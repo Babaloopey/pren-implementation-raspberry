@@ -1,0 +1,13 @@
+# Hardware-in-the-loop (variant B): the real robot nodes run on the Raspberry Pi, the laptop runs
+# the virtual microcontroller, the field and the GUI. Both talk ROS 2 over Zenoh (TCP port 7447).
+#
+#   Pi:      tools/pi_hil.sh
+#   Laptop:  start_simulator_hil.cmd <PI-IP>      or
+#            set PI_HOST=<PI-IP> && docker compose -f docker-compose.yml -f docker-compose.hil.yml up -d
+services:
+  sim:
+    environment:
+      - RMW_IMPLEMENTATION=rmw_zenoh_cpp
+      - PI_HOST=${PI_HOST:?PI_HOST fehlt - IP-Adresse des Raspberry Pi, z.B. set PI_HOST=192.168.1.50}
+      - 'ZENOH_CONFIG_OVERRIDE=mode="client"'
+    command: ["ros2", "launch", "robot_sim", "sim.launch.py", "profile:=hil"]
