@@ -1,3 +1,5 @@
+from glob import glob
+
 from setuptools import find_packages, setup
 
 package_name = 'robot_audio'
@@ -10,6 +12,9 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/models', glob('models/*')),
+        ('share/' + package_name + '/launch', glob('launch/*.py')),
+        ('share/' + package_name + '/config', glob('config/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -25,6 +30,7 @@ setup(
     entry_points={
         'console_scripts': [
             'microphone_driver = robot_audio.microphone_driver:main',
+            'voice_command_detector = robot_audio.voice_command_detector:main',
         ],
     },
 )

@@ -1,0 +1,47 @@
+# Parameters for the vision nodes. Override on the command line with
+#   ros2 run robot_vision bone_detector --ros-args -p camera_height:=0.18
+# (colcon build --symlink-install: edits here need no rebuild)
+bone_detector:
+  ros__parameters:
+    image_topic: /camera/image_raw     # straight from camera_driver (no image_processor)
+    conf_threshold: 0.5
+    iou_threshold: 0.45
+    max_rate: 5.0                      # Hz; 640 px YOLO26n on a Pi 5 needs roughly 150-300 ms
+    num_threads: 4
+    flip_horizontal: false
+    # --- camera: Raspberry Pi Camera Module 3 (standard lens) ---
+    dfov_deg: 75.0                     # diagonal field of view (Module 3 Wide: 120.0)
+    fx: 0.0                            # > 0: calibrated intrinsics instead of dfov
+    fy: 0.0
+    cx: 0.0
+    cy: 0.0
+    camera_pitch_deg: 0.0              # 0 = looking straight ahead (lens 90 deg to the floor)
+    camera_height: 0.0                 # m, lens above the floor. 0 = unknown -> only the
+                                       # direction (bearing) is filled; > 0 also fills
+                                       # position + has_position in /perception/bone_position
+    max_range: 6.0
+    frame_id: camera_link
+    publish_debug_image: false
+    stats_interval: 10.0               # s between "perf:" log lines, 0 = off
+
+gesture_detector:
+  ros__parameters:
+    image_topic: /camera/image_raw
+    max_rate: 15.0
+    process_width: 640
+    pose_every_n: 2
+    num_poses: 2
+    pose_conf: 0.5
+    flip_horizontal: false
+    hand_detection_conf: 0.5
+    open_palm_min: 0.5                 # SITZ
+    pointing_up_min: 0.5               # AUF
+    thumb_up_min: 0.6                  # TRICK (Kunststueck)
+    repeat_after_s: 0.0                # 0 = publish a gesture once when it becomes stable
+    stale_after_s: 1.0
+    publish_debug_image: false
+    stats_interval: 10.0               # s between "perf:" log lines, 0 = off
+    # debounce (frames): command needs enter_votes of the last history_length frames
+    history_length: 10
+    enter_votes: 6
+    keep_votes: 4
