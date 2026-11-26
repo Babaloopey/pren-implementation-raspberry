@@ -35,6 +35,7 @@ from rclpy.qos import qos_profile_sensor_data
 from robot_interfaces.msg import BoneDetection, BoneDetectionArray
 from sensor_msgs.msg import Image
 
+from .perf import PerfStats, age_ms
 from .yolo_onnx import YoloOnnx
 
 # model class index -> class_id on the topic
@@ -107,6 +108,7 @@ class BoneDetector(Node):
             ('max_range', 6.0),              # projections farther than this -> has_position false
             ('frame_id', 'camera_link'),
             ('publish_debug_image', False),
+            ('stats_interval', 10.0),        # s between perf log lines, 0 = off
         ])
         self.p = {prm.name: prm.value for prm in params}
 
@@ -118,6 +120,7 @@ class BoneDetector(Node):
         self.projector = None
         self.proj_size = None
         self.latest = None
+        self.perf = PerfStats(self.get_logger(), self.p['stats_interval'])
 
         self.bone_pub = self.create_publisher(BoneDetectionArray, '/perception/bone_position', 10)
         self.pylon_pub = self.create_publisher(BoneDetectionArray, '/perception/pylon_position', 10)
@@ -132,6 +135,8 @@ class BoneDetector(Node):
             f'on {self.p["image_topic"]}')
 
     def on_image(self, msg):
+        if self.latest is not None:
+            self.perf.skipped()
         self.latest = msg           # keep only the newest frame
 
     def step(self):
@@ -176,6 +181,7 @@ class BoneDetector(Node):
 
         self.bone_pub.publish(bones)
         self.pylon_pub.publish(pylons)
+        self.perf.add(infer=dt * 1000, latency=age_ms(self, msg.header.stamp))
         if bones.detections:
             b = bones.detections[0]
             self.get_logger().info(

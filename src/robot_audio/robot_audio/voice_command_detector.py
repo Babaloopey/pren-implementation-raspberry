@@ -55,6 +55,7 @@ class VoiceCommandDetector(Node):
             ('global_cooldown_s', 0.8),      # after any command, so one word can't fire two models
             ('audio_topic', '/audio/raw'),
             ('publish_scores', False),
+            ('stats_interval', 10.0),        # s between perf log lines, 0 = off
         ])
         self.p = {prm.name: prm.value for prm in params}
         cmds, files, thr = self.p['commands'], self.p['model_files'], self.p['thresholds']
@@ -84,6 +85,7 @@ class VoiceCommandDetector(Node):
         self.last_any = 0.0
         self.buf = np.zeros(0, dtype=np.int16)
         self.warned_rate = False
+        self.stats = {'t0': time.monotonic(), 'n': 0, 'ms': [], 'dropped': 0}
 
         self.cmd_pub = self.create_publisher(VoiceCommand, '/perception/voice_cmds', 10)
         self.score_pub = (self.create_publisher(Float32MultiArray, '/perception/voice_scores', 10)
@@ -108,6 +110,7 @@ class VoiceCommandDetector(Node):
         try:
             self.chunks.put_nowait(samples)
         except queue.Full:            # inference can't keep up -> drop the oldest audio
+            self.stats['dropped'] += 1
             try:
                 self.chunks.get_nowait()
                 self.chunks.put_nowait(samples)
@@ -123,7 +126,24 @@ class VoiceCommandDetector(Node):
             self.buf = np.concatenate([self.buf, samples])
             while len(self.buf) >= CHUNK:
                 chunk, self.buf = self.buf[:CHUNK], self.buf[CHUNK:]
-                self.detect(self.model.predict(chunk))
+                t0 = time.perf_counter()
+                scores = self.model.predict(chunk)
+                self.perf((time.perf_counter() - t0) * 1000)
+                self.detect(scores)
+
+    def perf(self, ms):
+        """perf: 12.5 chunks/s (realtime 12.5), predict 9/15 ms of 80 ms, 0 dropped, backlog 0"""
+        st = self.stats
+        st['n'] += 1
+        st['ms'].append(ms)
+        now = time.monotonic()
+        if self.p['stats_interval'] <= 0 or now - st['t0'] < self.p['stats_interval']:
+            return
+        self.get_logger().info(
+            f'perf: {st["n"] / (now - st["t0"]):.1f} chunks/s (realtime {RATE / CHUNK:.1f}), '
+            f'predict {sum(st["ms"]) / len(st["ms"]):.0f}/{max(st["ms"]):.0f} ms of '
+            f'{CHUNK / RATE * 1000:.0f} ms, {st["dropped"]} dropped, backlog {self.chunks.qsize()}')
+        self.stats = {'t0': now, 'n': 0, 'ms': [], 'dropped': 0}
 
     def detect(self, scores):
         now = time.monotonic()

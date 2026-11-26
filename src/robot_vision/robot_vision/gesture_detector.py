@@ -33,6 +33,7 @@ from sensor_msgs.msg import Image
 
 from .bone_detector import default_model
 from .gesture_logic import DEFAULTS, NONE, GestureLogic, mediapipe_persons
+from .perf import PerfStats, age_ms
 
 
 class GestureDetector(Node):
@@ -53,6 +54,7 @@ class GestureDetector(Node):
             ('repeat_after_s', 0.0),         # > 0: re-publish a held gesture every n s
             ('stale_after_s', 1.0),          # no frames for this long -> reset the vote
             ('publish_debug_image', False),
+            ('stats_interval', 10.0),        # s between perf log lines, 0 = off
         ] + [(k, v) for k, v in DEFAULTS.items()])
         self.p = {prm.name: prm.value for prm in params}
 
@@ -87,6 +89,7 @@ class GestureDetector(Node):
         self.last_frame_time = time.monotonic()
         self.published = NONE           # last gesture sent on /perception/gestures
         self.published_at = 0.0
+        self.perf = PerfStats(self.get_logger(), self.p['stats_interval'])
 
         self.cmd_pub = self.create_publisher(Gesture, '/perception/gestures', 10)
         self.debug_pub = (self.create_publisher(Image, '/perception/gesture_debug', 1)
@@ -97,6 +100,8 @@ class GestureDetector(Node):
         self.get_logger().info(f'gesture_detector ready on {self.p["image_topic"]} (SITZ / PLATZ / AUF / TRICK)')
 
     def on_image(self, msg):
+        if self.latest is not None:
+            self.perf.skipped()
         self.latest = msg
 
     def step(self):
@@ -125,11 +130,16 @@ class GestureDetector(Node):
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB,
                             data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
+        t0 = time.perf_counter()
+        pose_ms = 0.0
         if self.frame_no % max(1, self.p['pose_every_n']) == 0 or self.frame_no == 1:
             pose_result = self.pose.detect_for_video(mp_image, ts)
             self.logic.update_pose(mediapipe_persons(pose_result, w, h), w, h)
+            pose_ms = (time.perf_counter() - t0) * 1000
 
+        t1 = time.perf_counter()
         result = self.recognizer.recognize_for_video(mp_image, ts)
+        hands_ms = (time.perf_counter() - t1) * 1000
 
         current, hands = self.logic.update_hands(result, w, h)
         stable = self.logic.stabilize(current)
@@ -146,6 +156,9 @@ class GestureDetector(Node):
             self.get_logger().info(f'gesture {stable} ({out.confidence:.2f})')
             self.published, self.published_at = stable, now
 
+        pose = {'pose': pose_ms} if pose_ms else {}      # pose only runs every pose_every_n frames
+        self.perf.add(total=(time.perf_counter() - t0) * 1000, hands=hands_ms, **pose,
+                      latency=age_ms(self, msg.header.stamp))
         if self.debug_pub is not None:
             self.publish_debug(frame, hands, stable, msg.header)
 

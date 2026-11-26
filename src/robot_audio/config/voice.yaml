@@ -20,3 +20,4 @@ voice_command_detector:
     global_cooldown_s: 0.8
     audio_topic: /audio/raw
     publish_scores: false
+    stats_interval: 10.0               # s between "perf:" log lines, 0 = off

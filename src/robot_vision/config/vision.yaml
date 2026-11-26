@@ -22,6 +22,7 @@ bone_detector:
     max_range: 6.0
     frame_id: camera_link
     publish_debug_image: false
+    stats_interval: 10.0               # s between "perf:" log lines, 0 = off
 
 gesture_detector:
   ros__parameters:
@@ -39,6 +40,7 @@ gesture_detector:
     repeat_after_s: 0.0                # 0 = publish a gesture once when it becomes stable
     stale_after_s: 1.0
     publish_debug_image: false
+    stats_interval: 10.0               # s between "perf:" log lines, 0 = off
     # debounce (frames): command needs enter_votes of the last history_length frames
     history_length: 10
     enter_votes: 6
