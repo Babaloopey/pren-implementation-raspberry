@@ -3,9 +3,13 @@
 <package format="3">
   <name>robot_gpio</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>GPIO drivers: search/bone buttons, LED, buzzer (gpiozero).</description>
   <maintainer email="pren12@todo.todo">pren12</maintainer>
   <license>TODO: License declaration</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <!-- apt: python3-gpiozero python3-lgpio (lgpio = GPIO backend, needed on the Pi 5) -->
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

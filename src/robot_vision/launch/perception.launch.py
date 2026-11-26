@@ -1,7 +1,7 @@
 """All perception nodes of the robot (camera, bones, gestures, voice).
 
     ros2 launch robot_vision perception.launch.py [camera:=true] [bones:=true] [gestures:=true]
-        [voice:=true] [debug:=false] [mic:=USB]
+        [voice:=true] [debug:=false] [mic:=MV7]
 
 Data flow (no image_processor / voice_processor: the drivers deliver the final format):
   camera_driver     -> /camera/image_raw -> gesture_detector, bone_detector
@@ -36,7 +36,7 @@ def generate_launch_description():
         DeclareLaunchArgument('voice', default_value='true'),
         DeclareLaunchArgument('debug', default_value='false',
                               description='publish annotated images on /perception/*_debug'),
-        DeclareLaunchArgument('mic', default_value='', description='microphone name substring'),
+        DeclareLaunchArgument('mic', default_value='MV7', description='microphone name substring'),
 
         Node(package='robot_vision', executable='camera_driver', name='camera_driver',
              output='screen', condition=IfCondition(arg('camera'))),

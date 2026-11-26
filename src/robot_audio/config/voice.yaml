@@ -3,10 +3,11 @@
 #   ros2 topic echo /perception/voice_scores     (order: commands below)
 microphone_driver:
   ros__parameters:
-    device_index: -1                    # -1 = default input (the log lists all inputs)
-    device_name: ''                     # e.g. 'USB' to pick the USB microphone
-    mic_rate: 0                         # 0 = auto (16 kHz if supported, else resampled)
-    gain: 1.0
+    device_keyword: MV7                 # substring of the input device name (Shure MV7+)
+    sample_rate: 48000                  # rate the microphone records at
+    channels: 1
+    chunk_duration: 0.08                # 80 ms = one openWakeWord frame (1280 samples @ 16 kHz)
+    output_rate: 16000                  # published on /audio/raw (openWakeWord needs 16 kHz)
 
 voice_command_detector:
   ros__parameters:

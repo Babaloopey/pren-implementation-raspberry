@@ -4,9 +4,9 @@ from std_msgs.msg import Bool
 from gpiozero import Button
 
 
-class ButtonDriver(Node):
+class BoneButtonDriver(Node):
     def __init__(self):
-        super().__init__('button_driver')
+        super().__init__('bone_button_driver')
         self.declare_parameter('gpio_pin', 17)  # BCM pin number
         pin = self.get_parameter('gpio_pin').value
 
@@ -17,7 +17,7 @@ class ButtonDriver(Node):
         self.button.when_pressed = self.on_press
         self.button.when_released = self.on_release
 
-        self.get_logger().info(f'button_driver started on GPIO {pin} -> publishing to /perception/bone_contact')
+        self.get_logger().info(f'bone_button_driver started on GPIO {pin} -> publishing to /perception/bone_contact')
 
     def on_press(self):
         msg = Bool()
@@ -38,7 +38,7 @@ class ButtonDriver(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ButtonDriver()
+    node = BoneButtonDriver()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
