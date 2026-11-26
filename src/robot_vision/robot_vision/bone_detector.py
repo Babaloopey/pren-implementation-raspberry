@@ -31,12 +31,17 @@ import rclpy.executors
 from ament_index_python.packages import get_package_share_directory
 from cv_bridge import CvBridge
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from robot_interfaces.msg import BoneDetection, BoneDetectionArray
 from sensor_msgs.msg import Image
 
 from .perf import PerfStats, age_ms
 from .yolo_onnx import YoloOnnx
+
+# Camera images (~2.7 MB): best effort loses whole frames as soon as one UDP fragment is missing
+# (measured: ~50 % of the frames). Reliable with a short queue delivers all of them; only the
+# newest frame is processed anyway.
+IMAGE_QOS = QoSProfile(depth=2, history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.RELIABLE)
 
 # model class index -> class_id on the topic
 CLASSES = {0: BoneDetection.BONE, 1: BoneDetection.PYLON}
@@ -127,7 +132,7 @@ class BoneDetector(Node):
         self.debug_pub = (self.create_publisher(Image, '/perception/bone_debug', 1)
                           if self.p['publish_debug_image'] else None)
 
-        self.create_subscription(Image, self.p['image_topic'], self.on_image, qos_profile_sensor_data)
+        self.create_subscription(Image, self.p['image_topic'], self.on_image, IMAGE_QOS)
         self.create_timer(1.0 / max(self.p['max_rate'], 0.1), self.step)
         self.get_logger().info(
             f'bone_detector ready: {os.path.basename(path)} '

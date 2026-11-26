@@ -5,7 +5,8 @@ state_coordinator:
     rate: 20.0
     # --- "Knochen ist nahe" (no distance without camera height -> image position) ---
     image_height: 720                  # camera_driver: 1280x720
-    near_bottom_frac: 0.85             # bbox bottom edge below 85 % of the image height
+    near_bottom_frac: 0.95             # bbox bottom edge in the lowest 5 % of the image (horizontal camera
+                                       # at ~25 cm sees the floor only from ~0.66 m: "near" = ~0.75 m)
     near_distance: 0.35                # m, used instead when bone_detector knows the camera height
     min_bone_score: 0.5
     # --- times and distances from the state diagrams ---
@@ -24,7 +25,7 @@ state_coordinator:
     min_angular: 0.15
     approach_speed: 0.15
     touch_speed: 0.05
-    touch_max_distance: 0.40
+    touch_max_distance: 1.0            # blind creep after "Kopf senken" must cover the camera's blind zone
     lost_timeout: 2.0
     start_tolerance: 0.10
     shutdown_delay: 2.0
@@ -41,4 +42,5 @@ command_coordinator:
     brav_duration: 5.0
     trick_duration: 8.0
     led_on_duration: 1.5
-    publish_odom: true                 # dead reckoning from the commands
+    odom_source: internal              # internal = dead reckoning from the commands (no MCU yet)
+                                       # mcu = measured, from /mcu/odom (serial_uart or simulator)

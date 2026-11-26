@@ -1,0 +1,7 @@
+.git
+build
+install
+log
+logs
+tools/.venv-bridge
+**/__pycache__

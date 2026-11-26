@@ -92,7 +92,7 @@ class StateCoordinator(Node):
             ('rate', 20.0),
             ('log_dir', '~/pren_logs'),
             ('image_height', 720),            # camera image height in px
-            ('near_bottom_frac', 0.85),       # "Knochen ist nahe": bbox bottom below this image fraction
+            ('near_bottom_frac', 0.95),       # "Knochen ist nahe": bbox bottom below this image fraction
             ('near_distance', 0.35),          # ... or the floor projection is closer than this (m)
             ('min_bone_score', 0.5),
             ('poweroff_command', ''),         # e.g. 'sudo poweroff'; empty = only stop the nodes' work

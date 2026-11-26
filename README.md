@@ -47,7 +47,9 @@ jedes Modell eine andere braucht; ein Zwischen-Node würde jedes Bild nur ein zw
 | `/actuation/speaker_cmds` | `std_msgs/String` | → `speaker_driver` | `on`, `off`, `beep`, `double_beep` |
 | `/robot_command` | `robot_interfaces/RobotCommand` | `state_coordinator` → `command_coordinator` | `MOVE`, `TURN`, `VELOCITY`, `STOP`, `POSTURE`, `HEAD`, `BEHAVIOR`, `SIGNAL` mit `id` |
 | `/robot_command_status` | `robot_interfaces/CommandStatus` | `command_coordinator` → `state_coordinator` | Befehl `id` erledigt (`SUCCEEDED`) oder ersetzt (`ABORTED`) |
-| `/odom` | `nav_msgs/Odometry` | `command_coordinator` | Pose relativ zum Start; **vorerst aus den Befehlen berechnet, nicht gemessen** |
+| `/odom` | `nav_msgs/Odometry` | `command_coordinator` | Pose relativ zum Start; mit `odom_source: internal` aus den Befehlen berechnet, mit `mcu` gemessen |
+| `/motor_command` | `robot_interfaces/MotorCommand` | `command_coordinator` → Mikrocontroller | `linear`, `angular`, `posture`, `head`, `behavior`; laufend mit 20 Hz (Watchdog) |
+| `/mcu/odom` | `nav_msgs/Odometry` | Mikrocontroller → `command_coordinator` | gemessene Rad-Odometrie (später `serial_uart`, im Simulator der virtuelle Mikrocontroller) |
 | `/robot_state` | `std_msgs/String` (latched) | `state_coordinator` | aktueller Zustand, z. B. `SUCHE_ANFAHREN` |
 | `/system/shutdown` | `std_msgs/Empty` | → `state_coordinator` | «System ausschalten» (nur im Zustand `SITZEN`) |
 
@@ -176,7 +178,7 @@ z. B. `ros2 run robot_gpio search_button_driver --ros-args -p gpio_pin:=24`.
 ```bash
 sudo apt install ros-jazzy-cv-bridge ros-jazzy-tf2-ros ros-jazzy-rosidl-default-generators \
                  python3-opencv python3-numpy python3-scipy libportaudio2 \
-                 python3-gpiozero python3-lgpio
+                 python3-gpiozero python3-lgpio libgles2 libegl1   # libGLES/EGL: MediaPipe braucht sie
 # pip-Pakete (Ubuntu 24.04 schützt das System-Python -> --break-system-packages
 # oder ein venv mit --system-site-packages, aus dem auch colcon/ros2 gestartet wird)
 pip install --break-system-packages onnxruntime mediapipe sounddevice
@@ -229,6 +231,83 @@ ros2 run rqt_image_view rqt_image_view /perception/gesture_debug   # mit debug:=
 ros2 topic echo /robot_state                 # aktueller Zustand
 tail -f ~/pren_logs/states_*.log ~/pren_logs/commands_*.log
 ```
+
+## Simulator am PC (Windows, macOS, Linux)
+
+Der ganze Roboter läuft am PC in einem Docker-Container mit einer Weboberfläche. Es läuft der
+**unveränderte Roboter-Code**; ersetzt wird nur, was Hardware ist.
+
+**Windows: Doppelklick auf `start_simulator.cmd`.** Das startet den Container (erster Start baut das
+Image, ~10 min), öffnet die Kamera/Mikrofon-Brücke in einem eigenen Fenster «PREN Bruecke» und das GUI
+im Browser. Kamera und Mikrofon sind nur an, solange ein Node auf «Echt» steht.
+
+Ohne Skript (auch macOS/Linux):
+
+```bash
+docker compose up --build        # erster Start: Image bauen (~10 min), danach Sekunden
+```
+
+Dann im Browser **http://localhost:8080** öffnen. Beenden mit `docker compose down` (und das Brücken-Fenster schliessen).
+Voraussetzung: Docker Desktop. Code-Änderungen in `src/` wirken sofort im Container (Bind-Mount);
+nach einer Python-Änderung den Node im GUI kurz auf Ersatz und zurück auf «Echt» schalten, nach
+neuen Dateien/Nachrichten den Container neu starten (er baut beim Start inkrementell).
+
+**Was ersetzt wird:**
+
+| Auf dem Roboter | Im Simulator |
+|---|---|
+| Mikrocontroller (Motoren, Encoder) via `serial_uart` | virtueller Mikrocontroller: führt `/motor_command` aus (Watchdog 0.5 s, Beschleunigung begrenzt), meldet gemessene Odometrie mit 3 % Fehler auf `/mcu/odom` |
+| `camera_driver`, `microphone_driver` | `pc_bridge`: Laptop-Webcam und -Mikrofon (siehe unten) |
+| Taster, LED, Buzzer (`robot_gpio`) | Knöpfe und Anzeigen im GUI; Knochen-Taster aus der Berührung im Spielfeld |
+| echtes Spielfeld | Spielfeld wie im Demo: Startfeld, Suchsegment 1–5 m / 30°, Pylonen, Person |
+
+**Schalter pro Node** (Spalte «Nodes»): «Echt» startet den echten Node als eigenen Prozess,
+der Ersatz schaltet die passenden Knöpfe frei. «Log» zeigt die Ausgabe des Prozesses, inkl. `perf:`-Zeilen.
+
+| Node | Echt | Ersatz |
+|---|---|---|
+| Gestenerkennung | `gesture_detector` mit der Laptop-Webcam | Knöpfe SITZ / PLATZ / AUF / Daumen hoch |
+| Spracherkennung | `voice_command_detector` mit dem Laptop-Mikrofon | Knöpfe SUCH / HIER / BRAV / SITZ |
+| Knochenerkennung | `bone_detector` mit der Laptop-Webcam (echter Knochen vor der Kamera) | «Simuliert»: Kameramodell auf dem Spielfeld (Sichtfeld, Reichweite, Aussetzer, Rauschen) |
+| Knochen-Taster | – | «Simuliert»: Berührung im Feld · «Knopf»: von Hand |
+| `state_coordinator` | Zustandsautomat | «Manuell»: einzelne `RobotCommand`s (MOVE, TURN, POSTURE, SIGNAL …) von Hand senden |
+| `command_coordinator` | mit `odom_source: mcu` am virtuellen Mikrocontroller | «Manuell»: Mikrocontroller direkt fahren (Pfeile / WASD), LED und Buzzer schalten |
+
+Im Spielfeld: Klick setzt den Knochen, Shift+Klick fügt einen hinzu. Braun = wahre Position,
+blau = was der Roboter aus `/odom` glaubt (der Unterschied ist der Odometrie-Fehler), rot = Erkennungen.
+**Neustart** stellt den Roboter ins Startfeld und startet `state_coordinator` und `command_coordinator` neu.
+
+**Webcam und Mikrofon des Laptops** (für «Echt» bei Gesten, Sprache, Knochen). `start_simulator.cmd`
+startet die Brücke schon; von Hand, z. B. mit einer anderen Kamera:
+
+```bat
+tools\pc_bridge.cmd                 :: Kamera 0 + Standard-Mikrofon
+tools\pc_bridge.cmd --list          :: vorhandene Kameras/Mikrofone
+tools\pc_bridge.cmd --camera 1 --preview
+```
+
+Beim ersten Start legt das Skript `tools\.venv-bridge` an (opencv-python, sounddevice, numpy).
+Windows muss Desktop-Apps den Zugriff auf Kamera und Mikrofon erlauben (Einstellungen → Datenschutz).
+Die Debug-Bilder der echten Erkennungs-Nodes erscheinen im GUI unter dem Spielfeld.
+
+Logs (`states_*.log`, `commands_*.log`) landen im Ordner `logs/` des Repos.
+
+**Wenn nichts reagiert** (das GUI zeigt die Ursache meist direkt an):
+
+| Anzeige / Symptom | Ursache |
+|---|---|
+| Banner «state_coordinator wartet» | `command_coordinator` steht auf «Manuell»: zurück auf «Echt» |
+| «⚠ kein Kamerabild / kein Mikrofon» beim Node | Brücke läuft nicht: `tools\pc_bridge.cmd` starten |
+| «⚠ Kamerabild ist schwarz» | Kamera-Schieber geschlossen oder Kamera-Sperrtaste aktiv |
+| «⚠ Mikrofon liefert Stille» | Mikrofon stummgeschaltet (Taste oder Windows), oder anderes Mikrofon wählen: `--list`, `--mic N` |
+| Ereignis «Automat: … ignored in STEHEN» | Befehl ist in diesem Zustand laut Diagramm nicht erlaubt; die Zeile über den Taster-Knöpfen sagt, was gilt |
+| Sprache: Balken bleiben unter der roten Schwelle | leiser/anders sprechen ändert viel; Schwellen in `src/robot_audio/config/voice.yaml` (`thresholds`) |
+| Geste wird nicht stabil | Hand ~0.5 s ruhig halten (6 von 10 Bildern); SITZ: offene Hand vor der Brust, Schultern im Bild |
+
+**Erkenntnis aus dem Simulator:** Eine geradeaus blickende Kamera auf 25 cm Höhe sieht den Boden erst
+ab ~0.66 m. Deshalb gilt der Knochen als «nahe», wenn er im untersten 5 % des Bildes ist (~0.75 m), und
+nach «Kopf senken» fährt der Hund bis zu 1 m blind weiter (`near_bottom_frac`, `touch_max_distance`).
+Mit der echten Kamerahöhe neu prüfen: `docker compose run --rm --service-ports sim ros2 launch robot_sim sim.launch.py camera_height:=0.18`.
 
 ## Performance prüfen
 

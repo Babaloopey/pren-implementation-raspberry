@@ -1,0 +1,26 @@
+# PC simulator. Start:  docker compose up --build      then open http://localhost:8080
+# Webcam/microphone for the real recognition nodes: tools\pc_bridge.cmd (Windows)
+services:
+  sim:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: pren-sim:latest
+    container_name: pren-sim
+    init: true
+    stop_signal: SIGINT
+    stop_grace_period: 15s
+    ports:
+      - "8080:8080"     # web GUI
+      - "5601:5601"     # webcam from tools/pc_bridge_client.py
+      - "5602:5602"     # microphone from tools/pc_bridge_client.py
+    volumes:
+      - ./src:/ws/src
+      - ./logs:/ws/logs           # state and command logs, readable on Windows
+      - pren_build:/ws/build      # build results stay between starts
+      - pren_install:/ws/install
+    command: ["ros2", "launch", "robot_sim", "sim.launch.py"]
+
+volumes:
+  pren_build:
+  pren_install:

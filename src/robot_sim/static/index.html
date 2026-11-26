@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PREN Simulator</title>
+<style>
+:root {
+  --bg: #f4f5f7; --panel: #ffffff; --ink: #1d2330; --muted: #677086; --line: #dde1e8;
+  --accent: #2f6fdb; --accent-ink: #ffffff; --ok: #1f9d55; --warn: #d98e04; --bad: #d1343d;
+  --field: #eef1e8; --grid: #d9dfd0; --tape: #e0b100; --pylon: #f07c1a; --person: #4a78d0;
+  --truth: #8a5a2b; --belief: #2f6fdb; --trace: #3aa35a; --fov: rgba(40,170,220,.14); --ray: #d1343d;
+  --bone: #fbfaf3; --bone-edge: #8c8a7c; --touched: #f2c200; --btn: #eef0f4; --btn-ink: #1d2330;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11141a; --panel: #1a1e26; --ink: #e6e9ef; --muted: #8d95a8; --line: #2b313d;
+    --accent: #5b8ff0; --accent-ink: #0d1117; --ok: #3cc57a; --warn: #f0b23a; --bad: #f0606a;
+    --field: #1c2219; --grid: #2a3326; --tape: #e5c032; --pylon: #ff8c3a; --person: #6f97e8;
+    --truth: #c48a50; --belief: #6d9cf2; --trace: #4cc070; --fov: rgba(60,190,240,.16); --ray: #ff6b73;
+    --bone: #f3f1e6; --bone-edge: #a7a494; --touched: #ffd23f; --btn: #252b36; --btn-ink: #e6e9ef;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+h1 { font-size: 17px; margin: 0; font-weight: 650; }
+.state { font: 600 15px ui-monospace, Consolas, monospace; padding: 4px 10px; border-radius: 6px; background: var(--btn); }
+.ind { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.dot { width: 14px; height: 14px; border-radius: 50%; background: var(--line); border: 1px solid var(--line); }
+.dot.on { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+.dot.blink { animation: blink .5s steps(2) infinite; background: var(--ok); }
+.dot.buzz { background: var(--warn); box-shadow: 0 0 12px var(--warn); }
+@keyframes blink { 50% { opacity: .15; } }
+.spacer { flex: 1; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 12px; padding: 12px 16px; }
+@media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+.panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; font-weight: 650; }
+canvas { width: 100%; display: block; border-radius: 8px; background: var(--field); cursor: crosshair; touch-action: none; }
+.hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
+.row .lbl { width: 92px; color: var(--muted); font-size: 12px; }
+button { font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--btn); color: var(--btn-ink); cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .38; cursor: not-allowed; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.danger { color: var(--bad); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 4px 9px; }
+.seg button.active { background: var(--accent); color: var(--accent-ink); }
+.node { display: grid; grid-template-columns: 12px 1fr auto auto; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line); }
+.node:first-of-type { border-top: 0; }
+.node .name { font-weight: 600; }
+.node .perf { grid-column: 2 / 5; font: 11px ui-monospace, Consolas, monospace; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status { width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
+.status.run { background: var(--ok); } .status.dead { background: var(--bad); } .status.sim { background: var(--accent); }
+.mono { font: 12px ui-monospace, Consolas, monospace; }
+.events { max-height: 260px; overflow: auto; font: 12px ui-monospace, Consolas, monospace; }
+.events div { padding: 2px 0; border-bottom: 1px dashed var(--line); }
+.events .k { color: var(--accent); }
+.events .t { color: var(--muted); }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font: 12px ui-monospace, Consolas, monospace; }
+.kv span:nth-child(odd) { color: var(--muted); }
+.pad { display: grid; grid-template-columns: repeat(3, 52px); gap: 4px; }
+.pad button { height: 40px; }
+.imgs { display: flex; gap: 8px; flex-wrap: wrap; }
+.imgs figure { margin: 0; flex: 1 1 260px; }
+.imgs img { width: 100%; border-radius: 6px; border: 1px solid var(--line); background: #000; }
+.imgs figcaption { font-size: 12px; color: var(--muted); }
+input[type=number] { width: 70px; font: inherit; padding: 5px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+dialog { width: min(900px, 94vw); border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); padding: 0; }
+dialog header { justify-content: space-between; }
+dialog pre { margin: 0; padding: 12px; max-height: 70vh; overflow: auto; font: 12px ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; }
+.off { opacity: .45; }
+.err { color: var(--bad); font-size: 12px; min-height: 16px; }
+.banner { margin: 12px 16px 0; padding: 10px 14px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 18%, var(--panel)); border: 1px solid var(--warn); }
+.banner:empty { display: none; }
+.node .perf.warn { color: var(--warn); font-weight: 600; }
+.bars { display: grid; grid-template-columns: 48px 1fr 44px; gap: 4px 8px; align-items: center; font: 12px ui-monospace, Consolas, monospace; }
+.bar { position: relative; height: 14px; background: var(--btn); border-radius: 4px; overflow: hidden; }
+.bar .v { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+.bar .pk { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); opacity: .6; }
+.bar .th { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--bad); }
+.accept { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>PREN Simulator</h1>
+  <span class="state" id="state">-</span>
+  <span class="ind"><span class="dot" id="led"></span>LED</span>
+  <span class="ind"><span class="dot" id="buzzer"></span>Buzzer <span class="mono" id="buzzerText"></span></span>
+  <label class="ind"><input type="checkbox" id="sound"> Ton im Browser</label>
+  <span class="spacer"></span>
+  <span class="ind mono" id="conn">verbinde…</span>
+  <button id="resetBtn" title="Roboter ins Startfeld, state_ und command_coordinator neu starten">Neustart</button>
+</header>
+<div class="banner" id="banner"></div>
+<main>
+  <section>
+    <div class="panel">
+      <h2>Spielfeld</h2>
+      <canvas id="field" width="1200" height="560"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--truth)"></i>Roboter (wahr)</span>
+        <span><i style="background:var(--belief)"></i>Roboter laut /odom</span>
+        <span><i style="background:var(--trace)"></i>gefahrener Weg</span>
+        <span><i style="background:var(--ray)"></i>Erkennung (bearing)</span>
+        <span><i style="background:var(--fov);height:10px"></i>Kamerasicht</span>
+      </div>
+      <div class="hint">Klick ins Feld: Knochen dorthin setzen · Shift+Klick: weiteren Knochen hinzufügen
+        <button id="randBone">Zufälliger Knochen</button> <button id="clearBones">Knochen entfernen</button></div>
+    </div>
+    <div class="panel" id="imgPanel" hidden>
+      <h2>Kamera (Debug-Bilder der echten Nodes)</h2>
+      <div class="imgs" id="imgs"></div>
+    </div>
+    <div class="panel">
+      <h2>Ereignisse</h2>
+      <div class="events" id="events"></div>
+    </div>
+  </section>
+  <aside>
+    <div class="panel">
+      <h2>Nodes</h2>
+      <div id="nodes"></div>
+      <div class="row hint" id="bridge"></div>
+    </div>
+    <div class="panel">
+      <h2>Mensch</h2>
+      <div class="accept" id="accept"></div>
+      <div class="row"><span class="lbl">Gesten</span>
+        <span id="gestures"></span></div>
+      <div class="row"><span class="lbl">Sprache</span>
+        <span id="voice"></span></div>
+      <div class="row"><span class="lbl">Taster</span>
+        <button id="searchBtn" title="gedrückt halten = Taster gedrückt">Such-Taster</button>
+        <button id="boneBtn">Knochen-Taster</button>
+        <button id="shutdownBtn" class="danger">System ausschalten</button></div>
+      <div id="scoresBox" hidden><div class="hint">openWakeWord-Score live (Strich = Höchstwert, rot = Schwelle)</div><div class="bars" id="scores"></div></div>
+    </div>
+    <div class="panel" id="manualPanel">
+      <h2>Befehle an command_coordinator <span class="mono" id="manualHint"></span></h2>
+      <div class="row"><span class="lbl">MOVE</span>
+        <button data-rc="MOVE" data-value="0.3">+0.3 m</button><button data-rc="MOVE" data-value="1">+1 m</button>
+        <button data-rc="MOVE" data-value="-0.3">−0.3 m</button>
+        <input type="number" id="moveVal" value="0.5" step="0.1"><button id="moveGo">m</button></div>
+      <div class="row"><span class="lbl">TURN</span>
+        <button data-rc="TURN" data-deg="90">+90°</button><button data-rc="TURN" data-deg="-90">−90°</button>
+        <button data-rc="TURN" data-deg="180">180°</button>
+        <input type="number" id="turnVal" value="45" step="5"><button id="turnGo">°</button></div>
+      <div class="row"><span class="lbl">Fahren</span>
+        <button data-rc="STOP" class="danger">STOP</button>
+        <button data-rc="VELOCITY" data-lin="0.15" data-ang="0">VELOCITY vor</button>
+        <button data-rc="VELOCITY" data-lin="0" data-ang="0.6">VELOCITY links</button></div>
+      <div class="row"><span class="lbl">POSTURE</span>
+        <button data-rc="POSTURE" data-name="STAND">STAND</button><button data-rc="POSTURE" data-name="SIT">SIT</button>
+        <button data-rc="POSTURE" data-name="LIE">LIE</button></div>
+      <div class="row"><span class="lbl">HEAD</span>
+        <button data-rc="HEAD" data-name="UP">UP</button><button data-rc="HEAD" data-name="DOWN">DOWN</button></div>
+      <div class="row"><span class="lbl">BEHAVIOR</span>
+        <button data-rc="BEHAVIOR" data-name="BRAV">BRAV</button><button data-rc="BEHAVIOR" data-name="TRICK">TRICK</button></div>
+      <div class="row"><span class="lbl">SIGNAL</span>
+        <button data-rc="SIGNAL" data-name="ACK">ACK (Ton+LED)</button><button data-rc="SIGNAL" data-name="BARK">BARK</button></div>
+      <div class="row mono" id="manualStatus"></div>
+    </div>
+    <div class="panel" id="mcuPanel">
+      <h2>Mikrocontroller direkt <span class="mono" id="mcuHint"></span></h2>
+      <div class="grid2">
+        <div>
+          <div class="pad">
+            <span></span><button data-drive="1,0">▲</button><span></span>
+            <button data-drive="0,1">◀</button><button data-drive="0,0">■</button><button data-drive="0,-1">▶</button>
+            <span></span><button data-drive="-1,0">▼</button><span></span>
+          </div>
+          <div class="hint">gedrückt halten, oder W A S D</div>
+        </div>
+        <div>
+          <div class="row"><span class="lbl">Tempo</span><input type="number" id="speed" value="0.2" step="0.05" min="0.05" max="0.6"> m/s</div>
+          <div class="row"><button data-mpost="STAND">STAND</button><button data-mpost="SIT">SIT</button><button data-mpost="LIE">LIE</button></div>
+          <div class="row"><button data-mhead="UP">Kopf hoch</button><button data-mhead="DOWN">Kopf runter</button></div>
+          <div class="row"><button data-act="led:on">LED an</button><button data-act="led:blink">blink</button><button data-act="led:off">aus</button></div>
+          <div class="row"><button data-act="speaker:beep">beep</button><button data-act="speaker:double_beep">double_beep</button></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Motor (/motor_command → virtueller MCU)</h2>
+      <div class="kv" id="motor"></div>
+      <div class="err" id="err"></div>
+    </div>
+  </aside>
+</main>
+<dialog id="logDlg"><header><strong id="logTitle"></strong><button id="logClose">Schliessen</button></header><pre id="logText"></pre></dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const MODE_LABEL = { real: 'Echt', buttons: 'Knöpfe', sim: 'Simuliert', button: 'Knopf', manual: 'Manuell' };
+const GESTURES = [['SITZ', 'SITZ'], ['PLATZ', 'PLATZ'], ['AUF', 'AUF'], ['TRICK', 'Daumen hoch']];
+const WORDS = ['SUCH', 'HIER', 'BRAV', 'SITZ'];
+let S = null, lastEvent = 0, lastBuzz = -1, logKey = null, busy = false;
+
+async function post(body) {
+  try {
+    const r = await fetch('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json();
+    $('err').textContent = j.error || '';
+    return j;
+  } catch (e) { $('err').textContent = 'Simulator nicht erreichbar'; }
+}
+function mode(key) { const s = S && S.slots.find(x => x.key === key); return s ? s.mode : null; }
+
+// ---------------------------------------------------------------- static buttons
+$('gestures').innerHTML = GESTURES.map(([c, l]) => `<button data-gesture="${c}">${l}</button>`).join(' ');
+$('voice').innerHTML = WORDS.map(w => `<button data-voice="${w}">${w}</button>`).join(' ');
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b || b.disabled) return;
+  if (b.dataset.gesture) post({ type: 'gesture', command: b.dataset.gesture });
+  if (b.dataset.voice) post({ type: 'voice', command: b.dataset.voice });
+  if (b.dataset.rc) {
+    const a = { type: 'robot_command', action: b.dataset.rc, name: b.dataset.name || '' };
+    if (b.dataset.value) a.value = parseFloat(b.dataset.value);
+    if (b.dataset.deg) a.value = parseFloat(b.dataset.deg) * Math.PI / 180;
+    if (b.dataset.lin) { a.linear = parseFloat(b.dataset.lin); a.angular = parseFloat(b.dataset.ang); }
+    post(a);
+  }
+  if (b.dataset.mpost) post({ type: 'motor', posture: b.dataset.mpost, hold: 0 });
+  if (b.dataset.mhead) post({ type: 'motor', head: b.dataset.mhead, hold: 0 });
+  if (b.dataset.act) { const [t, d] = b.dataset.act.split(':'); post({ type: 'actuation', target: t, data: d }); }
+  if (b.dataset.mode) post({ type: 'mode', slot: b.dataset.slot, mode: b.dataset.mode });
+  if (b.dataset.log) openLog(b.dataset.log);
+});
+$('moveGo').onclick = () => post({ type: 'robot_command', action: 'MOVE', value: parseFloat($('moveVal').value) });
+$('turnGo').onclick = () => post({ type: 'robot_command', action: 'TURN', value: parseFloat($('turnVal').value) * Math.PI / 180 });
+$('shutdownBtn').onclick = () => post({ type: 'shutdown' });
+$('resetBtn').onclick = () => post({ type: 'reset', restart: true });
+$('randBone').onclick = () => post({ type: 'random_bone' });
+$('clearBones').onclick = () => post({ type: 'clear_bones' });
+function holdButton(btn, type) {
+  const down = () => post({ type, pressed: true }), up = () => post({ type, pressed: false });
+  btn.addEventListener('pointerdown', down);
+  btn.addEventListener('pointerup', up);
+  btn.addEventListener('pointerleave', (e) => { if (e.buttons) up(); });
+}
+holdButton($('searchBtn'), 'search_button');
+holdButton($('boneBtn'), 'bone_button');
+
+// ---------------------------------------------------------------- manual driving of the virtual MCU
+let drive = null;
+function sendDrive() {
+  if (!drive) return;
+  const sp = parseFloat($('speed').value) || 0.2;
+  post({ type: 'motor', linear: drive[0] * sp, angular: drive[1] * sp * 5, hold: 0.35 });
+}
+setInterval(sendDrive, 150);
+document.querySelectorAll('[data-drive]').forEach(b => {
+  b.addEventListener('pointerdown', () => { drive = b.dataset.drive.split(',').map(Number); sendDrive(); });
+  ['pointerup', 'pointerleave'].forEach(ev => b.addEventListener(ev, () => { drive = null; }));
+});
+const KEYS = { w: [1, 0], s: [-1, 0], a: [0, 1], d: [0, -1], ArrowUp: [1, 0], ArrowDown: [-1, 0], ArrowLeft: [0, 1], ArrowRight: [0, -1] };
+document.addEventListener('keydown', (e) => {
+  if (mode('command_coordinator') !== 'manual' || e.target.tagName === 'INPUT') return;
+  if (KEYS[e.key]) { drive = KEYS[e.key]; sendDrive(); e.preventDefault(); }
+});
+document.addEventListener('keyup', (e) => { if (KEYS[e.key]) drive = null; });
+
+// ---------------------------------------------------------------- logs
+async function openLog(key) { logKey = key; $('logTitle').textContent = key; $('logDlg').showModal(); refreshLog(); }
+async function refreshLog() {
+  if (!logKey || !$('logDlg').open) return;
+  const j = await (await fetch('/api/logs?key=' + encodeURIComponent(logKey))).json();
+  const pre = $('logText'), atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 10;
+  pre.textContent = j.lines.join('\n') || '(keine Ausgabe)';
+  if (atEnd) pre.scrollTop = pre.scrollHeight;
+}
+setInterval(refreshLog, 1000);
+$('logClose').onclick = () => { $('logDlg').close(); logKey = null; };
+
+// ---------------------------------------------------------------- render panels
+let nodesHtml = '', bridgeHtml = '';
+const NEEDS = { gesture_detector: 'video', bone_detector: 'video', voice_command_detector: 'audio' };
+function warnFor(s) {
+  const need = NEEDS[s.key];
+  if (s.mode !== 'real' || !need) return '';
+  if (!s.running) return '';
+  if (!S.bridge[need]) return need === 'video' ? '⚠ kein Kamerabild: tools\pc_bridge.cmd auf Windows starten'
+                                               : '⚠ kein Mikrofon: tools\pc_bridge.cmd auf Windows starten';
+  if (need === 'video' && S.bridge.video_black) return '⚠ Kamerabild ist schwarz: Kamera-Schieber offen? Kamera-Sperrtaste?';
+  if (need === 'audio' && S.bridge.audio_silent) return '⚠ Mikrofon liefert Stille: stummgeschaltet (Mikrofon-Taste / Windows)?';
+  return '';
+}
+// which commands the state machine accepts (team state diagrams)
+const ACCEPT = {
+  STEHEN: 'Geste SITZ · Geste PLATZ · Sprache SITZ / HIER / SUCH / BRAV · Such-Taster',
+  SITZEN: 'Geste AUF · Geste PLATZ · Sprache HIER / SUCH · Such-Taster · System ausschalten',
+  LIEGEN: 'Geste AUF · Geste SITZ · Geste Daumen hoch (Kunststück) · Sprache SITZ / HIER / SUCH · Such-Taster',
+};
+function renderBanner() {
+  const st = S.slots.find(x => x.key === 'state_coordinator'), cc = S.slots.find(x => x.key === 'command_coordinator');
+  let msg = '';
+  if (st.mode === 'real' && cc.mode === 'manual')
+    msg = 'state_coordinator wartet: er startet erst, wenn command_coordinator auf «Echt» steht. Bis dahin reagiert der Hund auf nichts.';
+  else if (st.mode === 'real' && S.state === '-')
+    msg = 'state_coordinator startet …';
+  $('banner').textContent = msg;
+  $('accept').textContent = st.mode !== 'real' ? 'state_coordinator ist aus (Manuell): Eingaben werden nur geloggt.'
+    : ACCEPT[S.state] ? `Im Zustand ${S.state} reagiert der Hund auf: ${ACCEPT[S.state]}`
+    : `Im Zustand ${S.state} werden Befehle ignoriert (Ablauf läuft).`;
+  const vs = S.voice_scores, box = $('scoresBox');
+  box.hidden = !vs;
+  if (vs) {
+    const words = ['SUCH', 'HIER', 'BRAV', 'SITZ'], th = [0.8, 0.5, 0.5, 0.8];
+    $('scores').innerHTML = words.map((w, i) => `<span>${w}</span><span class="bar"><span class="v" style="width:${(vs.values[i] || 0) * 100}%"></span>`
+      + `<span class="pk" style="left:${(vs.peaks[i] || 0) * 100}%"></span><span class="th" style="left:${th[i] * 100}%"></span></span>`
+      + `<span>${(vs.peaks[i] || 0).toFixed(2)}</span>`).join('');
+  }
+}
+function renderNodes() {
+  const html = S.slots.map(s => {
+    const st = s.process && s.mode === 'real' ? (s.running ? 'run' : 'dead') : 'sim';
+    const title = st === 'run' ? 'läuft' : st === 'dead' ? `gestoppt (exit ${s.exit})` : 'Ersatz im Simulator';
+    return `<div class="node"><span class="status ${st}" title="${title}"></span>
+      <span class="name">${s.label}</span>
+      <span class="seg">${s.modes.map(m => `<button data-slot="${s.key}" data-mode="${m}" class="${m === s.mode ? 'active' : ''}">${MODE_LABEL[m]}</button>`).join('')}</span>
+      ${s.process ? `<button data-log="${s.key}" title="Ausgabe des Prozesses">Log</button>` : '<span></span>'}
+      <span class="perf${warnFor(s) ? ' warn' : ''}">${warnFor(s) || (s.mode === 'real' ? (s.perf || (s.running ? 'läuft' : `gestoppt, exit ${s.exit}`)) : 'Ersatz: ' + (s.mode === 'sim' ? 'Simulation' : 'Knöpfe / manuell'))}</span></div>`;
+  }).join('');
+  if (html !== nodesHtml) { $('nodes').innerHTML = html; nodesHtml = html; }   // rebuild only on change (keeps clicks)
+  const b = S.bridge;
+  const bh = b.running
+    ? `PC-Brücke: Kamera ${b.video ? (b.fps || 0).toFixed(1) + ' fps' : 'nicht verbunden'} · Mikrofon ${b.audio ? (b.chunks_per_s || 0).toFixed(1) + ' Blöcke/s' : 'nicht verbunden'} <button data-log="pc_bridge">Log</button>`
+    : 'PC-Brücke aus (startet, sobald ein Node auf «Echt» steht)';
+  if (bh !== bridgeHtml) { $('bridge').innerHTML = bh; bridgeHtml = bh; }
+}
+function renderInputs() {
+  document.querySelectorAll('[data-gesture]').forEach(b => b.disabled = mode('gesture_detector') !== 'buttons');
+  document.querySelectorAll('[data-voice]').forEach(b => b.disabled = mode('voice_command_detector') !== 'buttons');
+  $('boneBtn').disabled = mode('bone_button') !== 'button';
+  const manual = mode('state_coordinator') === 'manual', mcu = mode('command_coordinator') === 'manual';
+  $('manualPanel').classList.toggle('off', !manual);
+  $('manualPanel').querySelectorAll('button').forEach(b => b.disabled = !manual || mcu);
+  $('manualHint').textContent = manual ? (mcu ? '(command_coordinator ist aus)' : '') : '(nur wenn state_coordinator = Manuell)';
+  $('mcuPanel').classList.toggle('off', !mcu);
+  $('mcuPanel').querySelectorAll('button').forEach(b => b.disabled = !mcu);
+  $('mcuHint').textContent = mcu ? '' : '(nur wenn command_coordinator = Manuell)';
+  const ids = Object.keys(S.manual_status).slice(-6);
+  $('manualStatus').textContent = ids.length ? 'Status: ' + ids.map(i => `#${i} ${S.manual_status[i]}`).join(' · ') : '';
+}
+function renderHeader() {
+  $('state').textContent = S.state;
+  const led = $('led'); led.className = 'dot' + (S.led === 'on' ? ' on' : S.led === 'blink' ? ' blink' : '');
+  if (lastBuzz >= 0 && S.buzzer.count !== lastBuzz) {
+    $('buzzer').classList.add('buzz'); setTimeout(() => $('buzzer').classList.remove('buzz'), 400);
+    $('buzzerText').textContent = S.buzzer.last;
+    if ($('sound').checked) beep(S.buzzer.last === 'double_beep' ? 2 : 1);
+  }
+  lastBuzz = S.buzzer.count;
+  const m = S.motor;
+  $('motor').innerHTML = [['linear', m.linear.toFixed(3) + ' m/s'], ['angular', m.angular.toFixed(3) + ' rad/s'],
+    ['posture', m.posture], ['head', m.head], ['behavior', m.behavior || '-'],
+    ['Watchdog', S.motor_alive ? 'Befehle kommen' : 'keine Befehle → steht'], ['Knochen-Kontakt', S.contact ? 'JA' : 'nein'],
+    ['wahr', `${S.robot.x.toFixed(2)}, ${S.robot.y.toFixed(2)}, ${(S.robot.yaw * 180 / Math.PI).toFixed(0)}°`],
+    ['/odom', S.belief ? `${S.belief.x.toFixed(2)}, ${S.belief.y.toFixed(2)}, ${(S.belief.yaw * 180 / Math.PI).toFixed(0)}°` : '-']]
+    .map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('');
+}
+function renderEvents() {
+  const box = $('events'), atTop = box.scrollTop < 10;
+  const fresh = S.events.filter(e => e.id > lastEvent);
+  if (!fresh.length) return;
+  lastEvent = fresh[fresh.length - 1].id;
+  for (const e of fresh) {
+    const d = document.createElement('div');
+    d.innerHTML = `<span class="t">${e.t}</span> <span class="k">${e.kind}</span> ${e.text.replace(/</g, '&lt;')}`;
+    box.prepend(d);
+  }
+  while (box.children.length > 300) box.lastChild.remove();
+  if (atTop) box.scrollTop = 0;
+}
+let imgTick = 0;
+function renderImages() {
+  const names = Object.keys(S.images).filter(n => S.images[n] < 3);
+  $('imgPanel').hidden = !names.length;
+  if (!names.length || ++imgTick % 3) return;
+  const box = $('imgs');
+  for (const n of names) {
+    let fig = box.querySelector(`[data-img="${n}"]`);
+    if (!fig) { fig = document.createElement('figure'); fig.dataset.img = n; fig.innerHTML = `<img alt="${n}"><figcaption>/perception/${n}_debug</figcaption>`; box.append(fig); }
+    fig.querySelector('img').src = `/api/image/${n}.jpg?t=${Date.now()}`;
+  }
+  box.querySelectorAll('figure').forEach(f => { if (!names.includes(f.dataset.img)) f.remove(); });
+}
+
+// ---------------------------------------------------------------- field canvas
+const cv = $('field'), ctx = cv.getContext('2d');
+const VIEW = { x0: -2.4, x1: 5.7, y0: -1.9, y1: 1.9 };
+let scale = 1, ox = 0, oy = 0;
+function resize() {
+  const w = cv.clientWidth, dpr = window.devicePixelRatio || 1;
+  const h = Math.round(w * (VIEW.y1 - VIEW.y0) / (VIEW.x1 - VIEW.x0));
+  cv.width = w * dpr; cv.height = h * dpr; cv.style.height = h + 'px';
+  scale = (w / (VIEW.x1 - VIEW.x0)) * dpr; ox = -VIEW.x0 * scale; oy = VIEW.y1 * scale;
+}
+window.addEventListener('resize', resize); resize();
+const px = (x, y) => [ox + x * scale, oy - y * scale];
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function line(pts, color, w = 2, dash = []) {
+  if (pts.length < 2) return;
+  ctx.strokeStyle = color; ctx.lineWidth = w; ctx.setLineDash(dash); ctx.beginPath();
+  pts.forEach(([x, y], i) => { const [a, b] = px(x, y); i ? ctx.lineTo(a, b) : ctx.moveTo(a, b); });
+  ctx.stroke(); ctx.setLineDash([]);
+}
+function rectAt(x, y, yaw, l, w, fill, stroke, lw = 2) {
+  const [cx, cy] = px(x, y); ctx.save(); ctx.translate(cx, cy); ctx.rotate(-yaw);
+  if (fill) { ctx.fillStyle = fill; ctx.fillRect(-l * scale / 2, -w * scale / 2, l * scale, w * scale); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.strokeRect(-l * scale / 2, -w * scale / 2, l * scale, w * scale); }
+  ctx.restore();
+}
+function text(t, x, y, color, size = 12, align = 'center') {
+  const [a, b] = px(x, y); const dpr = window.devicePixelRatio || 1;
+  ctx.fillStyle = color; ctx.font = `${size * dpr}px system-ui, sans-serif`; ctx.textAlign = align; ctx.fillText(t, a, b);
+}
+function draw() {
+  if (!S) return;
+  const W = cv.width, H = cv.height, dpr = window.devicePixelRatio || 1;
+  ctx.fillStyle = css('--field'); ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+  for (let x = Math.ceil(VIEW.x0); x <= VIEW.x1; x++) { const [a] = px(x, 0); ctx.beginPath(); ctx.moveTo(a, 0); ctx.lineTo(a, H); ctx.stroke(); }
+  for (let y = Math.ceil(VIEW.y0); y <= VIEW.y1; y++) { const [, b] = px(0, y); ctx.beginPath(); ctx.moveTo(0, b); ctx.lineTo(W, b); ctx.stroke(); }
+  for (let x = Math.ceil(VIEW.x0); x <= VIEW.x1; x++) text(`${x} m`, x + 0.04, VIEW.y0 + 0.06, css('--muted'), 10, 'left');
+  const f = S.field, tape = css('--tape');
+  rectAt(0, 0, 0, f.start_box[0], f.start_box[1], null, tape, 3 * dpr);
+  text('Startfeld', 0, -0.28, css('--muted'), 11);
+  const arc = (r) => Array.from({ length: 31 }, (_, i) => { const a = -f.seg_half_angle + i * 2 * f.seg_half_angle / 30; return [r * Math.cos(a), r * Math.sin(a)]; });
+  line([...arc(f.seg_r[0]), ...arc(f.seg_r[1]).reverse(), arc(f.seg_r[0])[0]], tape, 3 * dpr);
+  text('Suchbereich', 3.0, 1.0, css('--muted'), 11);
+  const circ = Array.from({ length: 49 }, (_, i) => [S.person[0] + f.interact_radius * Math.cos(i * Math.PI / 24), S.person[1] + f.interact_radius * Math.sin(i * Math.PI / 24)]);
+  line(circ, css('--person'), 1.5 * dpr, [6, 6]);
+  ctx.fillStyle = css('--person'); ctx.beginPath(); const [pa, pb] = px(S.person[0], S.person[1]); ctx.arc(pa, pb, 0.2 * scale, 0, 7); ctx.fill();
+  text('Person', S.person[0], S.person[1] + 0.3, css('--muted'), 11);
+  for (const [x, y] of S.pylons) { ctx.fillStyle = css('--pylon'); ctx.beginPath(); const [a, b] = px(x, y); ctx.arc(a, b, 0.075 * scale, 0, 7); ctx.fill(); }
+  for (const b of S.bones) {
+    const col = b.touched ? css('--touched') : css('--bone');
+    rectAt(b.x, b.y, b.yaw, 0.21, 0.035, col, css('--bone-edge'), 1);
+    for (const [dl, dw] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const ex = b.x + dl * 0.105 * Math.cos(b.yaw) - dw * 0.025 * Math.sin(b.yaw), ey = b.y + dl * 0.105 * Math.sin(b.yaw) + dw * 0.025 * Math.cos(b.yaw);
+      ctx.fillStyle = col; ctx.strokeStyle = css('--bone-edge'); ctx.lineWidth = 1; ctx.beginPath(); const [a, c] = px(ex, ey); ctx.arc(a, c, 0.022 * scale, 0, 7); ctx.fill(); ctx.stroke();
+    }
+  }
+  line(S.trace, css('--trace'), 2 * dpr);
+  line(S.belief_trace, css('--belief'), 1.5 * dpr, [5, 5]);
+  const r = S.robot, cam = S.camera;
+  const cx = r.x + cam.offset * Math.cos(r.yaw), cy = r.y + cam.offset * Math.sin(r.yaw);
+  ctx.fillStyle = css('--fov'); ctx.beginPath(); { const [a, b] = px(cx, cy); ctx.moveTo(a, b); }
+  for (let i = 0; i <= 20; i++) { const a = r.yaw - cam.half_hfov + i * cam.half_hfov / 10; const [p, q] = px(cx + cam.range * Math.cos(a), cy + cam.range * Math.sin(a)); ctx.lineTo(p, q); }
+  ctx.closePath(); ctx.fill();
+  for (const d of S.detections) {
+    const a = r.yaw + d.bearing;
+    line([[cx, cy], [cx + cam.range * Math.cos(a), cy + cam.range * Math.sin(a)]], d.class_id === 'bone' ? css('--ray') : css('--pylon'), 1.5 * dpr, d.class_id === 'bone' ? [] : [4, 4]);
+  }
+  if (S.belief) {
+    const B = S.belief; rectAt(B.x, B.y, B.yaw, 0.5, 0.2, null, css('--belief'), 2 * dpr);
+    line([[B.x, B.y], [B.x + 0.3 * Math.cos(B.yaw), B.y + 0.3 * Math.sin(B.yaw)]], css('--belief'), 2 * dpr);
+  }
+  rectAt(r.x, r.y, r.yaw, 0.5, 0.2, css('--truth'), S.contact ? css('--touched') : null, 3 * dpr);
+  line([[r.x, r.y], [r.x + 0.32 * Math.cos(r.yaw), r.y + 0.32 * Math.sin(r.yaw)]], css('--bg'), 3 * dpr);
+  const post = { STAND: 'steht', SIT: 'sitzt', LIE: 'liegt' }[S.motor.posture] || S.motor.posture;
+  text(`${post}${S.motor.head === 'DOWN' ? ', Kopf unten' : ''}${S.motor.behavior ? ', ' + S.motor.behavior : ''}`, r.x, r.y + 0.28, css('--ink'), 12);
+}
+cv.addEventListener('click', (e) => {
+  const rect = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const x = ((e.clientX - rect.left) * dpr - ox) / scale, y = (oy - (e.clientY - rect.top) * dpr) / scale;
+  post({ type: 'place_bone', x, y, add: e.shiftKey });
+});
+
+// ---------------------------------------------------------------- sound
+let audio = null;
+function beep(n) {
+  audio = audio || new AudioContext();
+  for (let i = 0; i < n; i++) {
+    const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime + i * 0.3;
+    o.frequency.value = 1800; g.gain.value = 0.08; o.connect(g).connect(audio.destination); o.start(t); o.stop(t + 0.15);
+  }
+}
+
+// ---------------------------------------------------------------- polling
+async function poll() {
+  if (busy) return; busy = true;
+  try {
+    S = await (await fetch('/api/state')).json();
+    $('conn').textContent = 'verbunden';
+    renderHeader(); renderBanner(); renderNodes(); renderInputs(); renderEvents(); renderImages(); draw();
+  } catch (e) { $('conn').textContent = 'Simulator nicht erreichbar'; }
+  busy = false;
+}
+setInterval(poll, 100);
+</script>
+</body>
+</html>

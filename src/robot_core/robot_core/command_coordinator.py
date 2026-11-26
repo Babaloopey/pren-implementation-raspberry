@@ -1,17 +1,26 @@
 """command_coordinator: executes the RobotCommands of state_coordinator.
 
-For now there is no microcontroller connection (serial_uart), so this node
-  * writes every motor command to a log file (what serial_uart will later send over UART),
-  * drives the buzzer and LED through the existing robot_gpio drivers ("Ton + LED", "Bellen"),
-  * estimates when a command is finished (distance / speed, angle / turn rate, fixed times
-    for posture, head and behaviours) and reports it on /robot_command_status,
-  * integrates the commanded velocities into a pose estimate on /odom (dead reckoning from
-    commands, NOT measured). Once the microcontroller sends encoder/IMU data, /odom has to come
-    from there and the completion of MOVE/TURN from the measured pose.
+Interface to the microcontroller (MCU), the same on the robot and in the simulator:
+  /motor_command  robot_interfaces/MotorCommand, sent continuously at `rate` (watchdog)
+                  -> serial_uart (robot, UART) or virtual_mcu (simulator)
+  /mcu/odom       nav_msgs/Odometry, measured wheel odometry from the MCU (odom_source: mcu)
+
+odom_source
+  internal  no MCU feedback yet: the pose is integrated from the commanded velocities (NOT measured)
+            and MOVE/TURN are finished after distance / speed, angle / turn rate
+  mcu       the pose comes from /mcu/odom and MOVE/TURN are finished by the measured progress
+
+In both cases the node
+  * writes every motor command to a log file,
+  * drives the buzzer and LED through the robot_gpio drivers ("Ton + LED", "Bellen"),
+  * finishes POSTURE / HEAD / BEHAVIOR after fixed times (no MCU feedback defined for them yet),
+  * reports every finished command on /robot_command_status and the pose on /odom.
 
 Subscribes:
   /robot_command          robot_interfaces/RobotCommand
+  /mcu/odom               nav_msgs/Odometry     (only with odom_source: mcu)
 Publishes:
+  /motor_command          robot_interfaces/MotorCommand
   /robot_command_status   robot_interfaces/CommandStatus
   /odom                   nav_msgs/Odometry   (frame odom -> base_link, origin = pose at start)
   /actuation/speaker_cmds std_msgs/String     beep / double_beep
@@ -30,7 +39,7 @@ import rclpy
 import rclpy.executors
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
-from robot_interfaces.msg import CommandStatus, RobotCommand
+from robot_interfaces.msg import CommandStatus, MotorCommand, RobotCommand
 from std_msgs.msg import String
 
 from .filelog import file_logger
@@ -55,25 +64,33 @@ class CommandCoordinator(Node):
             ('brav_duration', 5.0),        # s, "Brav beendet"
             ('trick_duration', 8.0),       # s, "Kunststueck beendet"
             ('led_on_duration', 1.5),      # s the LED stays on / blinks for a signal
-            ('publish_odom', True),        # dead reckoning from commands (until the MCU sends odometry)
+            ('odom_source', 'internal'),   # internal (no MCU yet) | mcu (/mcu/odom from the microcontroller)
         ])
         self.p = {prm.name: prm.value for prm in params}
         self.flog, path = file_logger('commands', self.p['log_dir'], 'commands')
 
         self.status_pub = self.create_publisher(CommandStatus, '/robot_command_status', 50)
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
+        self.motor_pub = self.create_publisher(MotorCommand, '/motor_command', 10)
         self.speaker_pub = self.create_publisher(String, '/actuation/speaker_cmds', 10)
         self.led_pub = self.create_publisher(String, '/actuation/led_cmds', 10)
         self.create_subscription(RobotCommand, '/robot_command', self.on_command, 50)
+        self.use_mcu = self.p['odom_source'] == 'mcu'
+        if self.use_mcu:
+            self.create_subscription(Odometry, '/mcu/odom', self.on_mcu_odom, 50)
 
         self.v = self.w = 0.0                  # current motor command
+        self.posture, self.head, self.behavior = RobotCommand.STAND, RobotCommand.UP, ''
+        self.progress = [0.0, 0.0]             # measured |distance|, |angle| since the last tick (mcu)
+        self.last_mcu = None                   # last /mcu/odom pose (x, y, yaw)
         self.motion = None                     # {'id', 'name', 'left', 'kind', 't0'} for MOVE / TURN
         self.jobs = {}                         # action -> {'id', 'name', 'until', 't0'} (POSTURE/HEAD/BEHAVIOR)
         self.led_off_at = None
         self.x = self.y = self.yaw = 0.0
         self.last_tick = self.now()
         self.create_timer(1.0 / self.p['rate'], self.step)
-        self.get_logger().info(f'command_coordinator ready (no MCU: motor commands -> {path})')
+        self.get_logger().info(f'command_coordinator ready (odom_source {self.p["odom_source"]}, '
+                               f'motor commands -> /motor_command and {path})')
 
     def now(self):
         return self.get_clock().now().nanoseconds * 1e-9
@@ -122,6 +139,12 @@ class CommandCoordinator(Node):
                         RobotCommand.BEHAVIOR: self.p['trick_duration'] if msg.name == RobotCommand.TRICK
                         else self.p['brav_duration']}[a]
             self.log(f'MOTOR {name} {msg.name}')
+            if a == RobotCommand.POSTURE:
+                self.posture = msg.name
+            elif a == RobotCommand.HEAD:
+                self.head = msg.name
+            else:
+                self.behavior = msg.name
             t = self.now()
             self.jobs[a] = {'id': msg.id, 'name': f'{name} {msg.name}', 'until': t + duration, 't0': t}
 
@@ -160,28 +183,53 @@ class CommandCoordinator(Node):
         t = self.now()
         dt, self.last_tick = max(0.0, t - self.last_tick), t
 
-        # dead reckoning from the commanded velocity
-        self.yaw += self.w * dt
-        self.x += self.v * dt * math.cos(self.yaw)
-        self.y += self.v * dt * math.sin(self.yaw)
+        if self.use_mcu:                         # measured progress from /mcu/odom
+            d_lin, d_ang = self.progress
+            self.progress = [0.0, 0.0]
+        else:                                    # dead reckoning from the commanded velocity
+            self.yaw += self.w * dt
+            self.x += self.v * dt * math.cos(self.yaw)
+            self.y += self.v * dt * math.sin(self.yaw)
+            d_lin, d_ang = abs(self.v) * dt, abs(self.w) * dt
 
         if self.motion is not None:
             m = self.motion
-            m['left'] -= abs(self.v if m['kind'] == 'move' else self.w) * dt
+            m['left'] -= d_lin if m['kind'] == 'move' else d_ang
             if m['left'] <= 0.0:
                 self.set_motor(0.0, 0.0)
                 self.motion = None
                 self.finish(m, CommandStatus.SUCCEEDED)
 
         for a in [a for a, j in self.jobs.items() if t >= j['until']]:
+            if a == RobotCommand.BEHAVIOR:
+                self.behavior = ''
             self.finish(self.jobs.pop(a), CommandStatus.SUCCEEDED)
 
         if self.led_off_at is not None and t >= self.led_off_at:
             self.led_pub.publish(String(data='off'))
             self.led_off_at = None
 
-        if self.p['publish_odom']:
-            self.publish_odom()
+        self.publish_motor()
+        self.publish_odom()
+
+    def publish_motor(self):
+        msg = MotorCommand()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.linear, msg.angular = float(self.v), float(self.w)
+        msg.posture, msg.head, msg.behavior = self.posture, self.head, self.behavior
+        self.motor_pub.publish(msg)
+
+    def on_mcu_odom(self, msg):
+        p = msg.pose.pose
+        q = p.orientation
+        pose = (p.position.x, p.position.y,
+                math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z)))
+        if self.last_mcu is not None:
+            lx, ly, lyaw = self.last_mcu
+            self.progress[0] += math.hypot(pose[0] - lx, pose[1] - ly)
+            self.progress[1] += abs(math.atan2(math.sin(pose[2] - lyaw), math.cos(pose[2] - lyaw)))
+        self.last_mcu = pose
+        self.x, self.y, self.yaw = pose
 
     def publish_odom(self):
         msg = Odometry()

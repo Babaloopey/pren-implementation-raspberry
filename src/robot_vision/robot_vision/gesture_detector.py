@@ -27,13 +27,18 @@ import rclpy
 import rclpy.executors
 from cv_bridge import CvBridge
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from robot_interfaces.msg import Gesture
 from sensor_msgs.msg import Image
 
 from .bone_detector import default_model
 from .gesture_logic import DEFAULTS, NONE, GestureLogic, mediapipe_persons
 from .perf import PerfStats, age_ms
+
+# Camera images (~2.7 MB): best effort loses whole frames as soon as one UDP fragment is missing
+# (measured: ~50 % of the frames). Reliable with a short queue delivers all of them; only the
+# newest frame is processed anyway.
+IMAGE_QOS = QoSProfile(depth=2, history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.RELIABLE)
 
 
 class GestureDetector(Node):
@@ -95,7 +100,7 @@ class GestureDetector(Node):
         self.debug_pub = (self.create_publisher(Image, '/perception/gesture_debug', 1)
                           if self.p['publish_debug_image'] else None)
 
-        self.create_subscription(Image, self.p['image_topic'], self.on_image, qos_profile_sensor_data)
+        self.create_subscription(Image, self.p['image_topic'], self.on_image, IMAGE_QOS)
         self.create_timer(1.0 / max(self.p['max_rate'], 0.1), self.step)
         self.get_logger().info(f'gesture_detector ready on {self.p["image_topic"]} (SITZ / PLATZ / AUF / TRICK)')
 
