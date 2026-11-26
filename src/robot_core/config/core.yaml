@@ -1,0 +1,44 @@
+# Parameters for robot_core. Log files of both nodes go to log_dir.
+state_coordinator:
+  ros__parameters:
+    log_dir: ~/pren_logs
+    rate: 20.0
+    # --- "Knochen ist nahe" (no distance without camera height -> image position) ---
+    image_height: 720                  # camera_driver: 1280x720
+    near_bottom_frac: 0.85             # bbox bottom edge below 85 % of the image height
+    near_distance: 0.35                # m, used instead when bone_detector knows the camera height
+    min_bone_score: 0.5
+    # --- times and distances from the state diagrams ---
+    hier_distance: 0.30                # "30cm bewegt"
+    search_timeout: 120.0              # "2 Minuten abgelaufen"
+    behavior_timeout: 60.0             # "1 Minute abgelaufen"
+    scan_step: 1.0                     # "1m bewegt"
+    bark_duration: 2.0                 # "Bellen beendet"
+    # --- search tuning ---
+    scan_duration: 2.0
+    scan_min_hits: 3
+    max_search_distance: 5.0
+    align_tolerance_deg: 4.0
+    turn_gain: 1.5
+    max_angular: 0.8
+    min_angular: 0.15
+    approach_speed: 0.15
+    touch_speed: 0.05
+    touch_max_distance: 0.40
+    lost_timeout: 2.0
+    start_tolerance: 0.10
+    shutdown_delay: 2.0
+    poweroff_command: ''               # e.g. 'sudo poweroff' (needs sudo without password)
+
+command_coordinator:
+  ros__parameters:
+    log_dir: ~/pren_logs
+    rate: 20.0
+    max_linear: 0.20                   # m/s for MOVE (until the MCU reports the real motion)
+    max_angular: 1.0                   # rad/s for TURN
+    posture_duration: 2.0              # s until "Zielposition erreicht"
+    head_duration: 1.0
+    brav_duration: 5.0
+    trick_duration: 8.0
+    led_on_duration: 1.5
+    publish_odom: true                 # dead reckoning from the commands

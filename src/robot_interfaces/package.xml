@@ -3,7 +3,7 @@
 <package format="3">
   <name>robot_interfaces</name>
   <version>0.0.0</version>
-  <description>Messages of the PREN dog robot (perception results, audio chunks).</description>
+  <description>Messages of the PREN dog robot (perception results, audio chunks, robot commands).</description>
   <maintainer email="pren12@todo.todo">pren12</maintainer>
   <license>TODO: License declaration</license>
 

@@ -10,7 +10,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/AudioChunk.msg"
   "msg/BoneDetection.msg"
   "msg/BoneDetectionArray.msg"
+  "msg/CommandStatus.msg"
   "msg/Gesture.msg"
+  "msg/RobotCommand.msg"
   "msg/VoiceCommand.msg"
   DEPENDENCIES std_msgs geometry_msgs
 )
